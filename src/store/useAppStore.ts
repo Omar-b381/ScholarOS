@@ -239,6 +239,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   setProfile: async (profile) => {
     set({ profile })
     await window.electronAPI.settings.set('profile', profile)
+
+    // Sync changes into the active profile inside the profiles list to prevent reverting on reloads
+    const activeId = get().activeProfileId
+    const currentProfiles = get().profiles
+    if (activeId && currentProfiles.length > 0) {
+      const updatedProfiles = currentProfiles.map(p => 
+        p.id === activeId 
+          ? { id: activeId, ...profile } 
+          : p
+      )
+      set({ profiles: updatedProfiles })
+      await window.electronAPI.settings.set('profiles', updatedProfiles)
+    }
   },
 
   loadAllData: async () => {
