@@ -49,8 +49,11 @@ import {
   getAllLecturers,
   saveLecturer,
   deleteLecturer,
-  getDatabaseStats
+  getDatabaseStats,
+  db
 } from './services/database'
+
+import { formatCitation, fetchByDOI, parseBibFile } from './services/citationService'
 
 import {
   initNotificationService,
@@ -248,7 +251,6 @@ function registerIpcHandlers() {
   ipcMain.handle('db:flashcards:getAll', () => getAllFlashcards())
   ipcMain.handle('db:flashcards:save', (_, card) => saveFlashcard(card))
   ipcMain.handle('db:flashcards:delete', (_, id) => deleteFlashcard(id))
-  ipcMain.handle('db:flashcards:getDue', (_, now) => getDueFlashcards(now))
 
   // DB Resources
   ipcMain.handle('db:resources:getAll', () => getAllResources())
@@ -355,4 +357,81 @@ function registerIpcHandlers() {
   ipcMain.handle('google:logout', () => disconnectGoogleCalendar())
   ipcMain.handle('google:getStatus', () => getGoogleStatus())
   ipcMain.handle('google:sync', () => syncEventsToGoogleCalendar())
+
+  // ── Flashcard FSRS review ──────────────────────────
+  ipcMain.handle('db:flashcards:review', (_e, { id, rating }: { id: string; rating: number }) => {
+    const row = db.prepare('SELECT * FROM flashcards WHERE id = ?').get(id) as any
+    if (!row) throw new Error('Flashcard not found')
+
+    const { FSRS, generatorParameters } = require('ts-fsrs')
+    const { dbRowToCard, cardToDbFields } = require('./services/fsrsHelper')
+    const fsrsInstance = new FSRS(generatorParameters({ enable_fuzz: true }))
+    const card = dbRowToCard(row)
+    const result = fsrsInstance.next(card, new Date(), rating)
+    const scheduled = result[rating]
+    const fields = cardToDbFields(scheduled.card)
+
+    db.prepare(`
+      UPDATE flashcards SET
+        due = @due, stability = @stability, difficulty = @difficulty,
+        elapsed_days = @elapsed_days, scheduled_days = @scheduled_days,
+        reps = @reps, lapses = @lapses, state = @state, last_review = @last_review
+      WHERE id = ?
+    `).run({ ...fields }, id)
+
+    return {
+      nextReviewIn: scheduled.card.scheduled_days,
+      due: fields.due,
+    }
+  })
+
+  ipcMain.handle('db:flashcards:getDue', () => {
+    const now = new Date().toISOString()
+    return db.prepare(
+      "SELECT * FROM flashcards WHERE due <= ? ORDER BY due ASC"
+    ).all(now)
+  })
+
+  ipcMain.handle('db:flashcards:getStats', () => {
+    const total = (db.prepare('SELECT COUNT(*) as c FROM flashcards').get() as any).c
+    const due   = (db.prepare("SELECT COUNT(*) as c FROM flashcards WHERE due <= datetime('now')").get() as any).c
+    const new_  = (db.prepare('SELECT COUNT(*) as c FROM flashcards WHERE state = 0').get() as any).c
+    const review = (db.prepare('SELECT COUNT(*) as c FROM flashcards WHERE state = 2').get() as any).c
+    return { total, due, new: new_, review }
+  })
+
+  // ── Kanban Board Reordering ─────────────────────────
+  ipcMain.handle('db:assignments:reorder', (_e, items: { id: string; column: string; order: number }[]) => {
+    const stmt = db.prepare('UPDATE assignments SET kanban_column = ?, kanban_order = ? WHERE id = ?')
+    const updateMany = db.transaction((rows: typeof items) => {
+      for (const row of rows) stmt.run(row.column, row.order, row.id)
+    })
+    updateMany(items)
+    return { ok: true }
+  })
+
+  // ── Academic Citations ──────────────────────────────
+  ipcMain.handle('citation:format', (_e, input, format) => {
+    return formatCitation(input, format)
+  })
+
+  ipcMain.handle('citation:fetchDOI', async (_e, doi: string) => {
+    return await fetchByDOI(doi)
+  })
+
+  ipcMain.handle('citation:parseBib', (_e, content: string) => {
+    return parseBibFile(content)
+  })
+
+  ipcMain.handle('citation:importBibFile', async () => {
+    const { dialog } = require('electron')
+    const result = await dialog.showOpenDialog({
+      title:       'استيراد ملف BibTeX',
+      filters:     [{ name: 'BibTeX', extensions: ['bib'] }],
+      properties:  ['openFile'],
+    })
+    if (result.canceled || !result.filePaths[0]) return []
+    const content = require('fs').readFileSync(result.filePaths[0], 'utf-8')
+    return parseBibFile(content)
+  })
 }

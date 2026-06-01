@@ -115,5 +115,16 @@ interface Window {
     };
     // Notification listener
     on: (channel: string, callback: (...args: any[]) => void) => (() => void) | undefined;
+    // Spaced repetition flashcards (FSRS)
+    db_flashcards_review: (id: string, rating: number) => Promise<{ nextReviewIn: number; due: string }>;
+    db_flashcards_getDue: () => Promise<any[]>;
+    db_flashcards_getStats: () => Promise<{ total: number; due: number; new: number; review: number }>;
+    // Assignments Kanban Reordering
+    db_assignments_reorder: (items: { id: string; column: string; order: number }[]) => Promise<{ ok: boolean }>;
+    // Academic citations (citation-js)
+    citation_format: (input: any, format: string) => Promise<string>;
+    citation_fetchDOI: (doi: string) => Promise<any>;
+    citation_parseBib: (content: string) => Promise<any[]>;
+    citation_importBibFile: () => Promise<any[]>;
   };
 }

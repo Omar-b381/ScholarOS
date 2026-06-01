@@ -11,6 +11,7 @@ import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
+import { KanbanBoard } from './Assignments/KanbanBoard'
 
 import {
   FileSpreadsheet,
@@ -74,6 +75,15 @@ export function Assignments() {
       setPdfs(list)
     } catch (err) {
       console.error('Failed to list PDFs', err)
+    }
+  }
+
+  const loadAssignments = async () => {
+    try {
+      const list = await window.electronAPI.db.assignments.getAll()
+      useAppStore.setState({ assignments: list })
+    } catch (err) {
+      console.error('Failed to reload assignments', err)
     }
   }
 
@@ -226,8 +236,9 @@ export function Assignments() {
       </div>
 
       <Tabs defaultValue="assignments" value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-2 max-w-[400px]">
+        <TabsList className="grid w-full grid-cols-3 max-w-[600px]">
           <TabsTrigger value="assignments">الواجبات الدراسية</TabsTrigger>
+          <TabsTrigger value="kanban">لوحة كانبان</TabsTrigger>
           <TabsTrigger value="vault">خزانة الـ PDF</TabsTrigger>
         </TabsList>
 
@@ -353,6 +364,11 @@ export function Assignments() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        {/* TAB C: Kanban Board */}
+        <TabsContent value="kanban" className="space-y-4 mt-6">
+          <KanbanBoard assignments={assignments} onUpdate={loadAssignments} />
         </TabsContent>
 
         {/* TAB B: PDF Vault */}

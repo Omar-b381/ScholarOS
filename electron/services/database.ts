@@ -4,7 +4,7 @@ import path from 'path'
 import fs from 'fs'
 import { seedDatabase } from './databaseSeeder'
 
-let db: Database.Database
+export let db: Database.Database
 
 export function initDatabase() {
   const dbDir = app.getPath('userData')
@@ -55,10 +55,24 @@ export function initDatabase() {
     );
 
     CREATE TABLE IF NOT EXISTS flashcards (
-      id TEXT PRIMARY KEY, question TEXT, answer TEXT,
-      source_page_id TEXT, ease_factor REAL DEFAULT 2.5,
-      interval INTEGER DEFAULT 1, repetitions INTEGER DEFAULT 0,
-      next_review TEXT, created_at TEXT
+      id TEXT PRIMARY KEY,
+      question TEXT NOT NULL,
+      answer TEXT NOT NULL,
+      source_page_id TEXT,
+      course_id TEXT,
+
+      -- FSRS fields (replaces old SM-2 fields)
+      due TEXT NOT NULL DEFAULT (datetime('now')),
+      stability REAL NOT NULL DEFAULT 0,
+      difficulty REAL NOT NULL DEFAULT 0,
+      elapsed_days INTEGER NOT NULL DEFAULT 0,
+      scheduled_days INTEGER NOT NULL DEFAULT 0,
+      reps INTEGER NOT NULL DEFAULT 0,
+      lapses INTEGER NOT NULL DEFAULT 0,
+      state INTEGER NOT NULL DEFAULT 0,
+      last_review TEXT,
+
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS resources (
@@ -95,6 +109,45 @@ export function initDatabase() {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
   `)
+
+  // Flashcards FSRS Migrations
+  const cols = db.prepare("PRAGMA table_info(flashcards)").all() as any[]
+  const hasStability = cols.some(c => c.name === 'stability')
+  if (!hasStability) {
+    try {
+      db.exec(`
+        ALTER TABLE flashcards ADD COLUMN due TEXT DEFAULT (datetime('now'));
+        ALTER TABLE flashcards ADD COLUMN stability REAL DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN difficulty REAL DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN elapsed_days INTEGER DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN scheduled_days INTEGER DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN reps INTEGER DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN lapses INTEGER DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN state INTEGER DEFAULT 0;
+        ALTER TABLE flashcards ADD COLUMN last_review TEXT;
+        ALTER TABLE flashcards ADD COLUMN course_id TEXT;
+      `)
+    } catch (e) {
+      console.error('Failed to run FSRS migrations', e)
+    }
+  }
+
+  // Assignments Kanban Migrations
+  const asgCols = db.prepare("PRAGMA table_info(assignments)").all() as any[]
+  if (!asgCols.some(c => c.name === 'kanban_column')) {
+    try {
+      db.exec(`ALTER TABLE assignments ADD COLUMN kanban_column TEXT DEFAULT 'todo'`)
+    } catch (e) {
+      console.error('Failed to add kanban_column', e)
+    }
+  }
+  if (!asgCols.some(c => c.name === 'kanban_order')) {
+    try {
+      db.exec(`ALTER TABLE assignments ADD COLUMN kanban_order INTEGER DEFAULT 0`)
+    } catch (e) {
+      console.error('Failed to add kanban_order', e)
+    }
+  }
 
   // Automatic seeding is disabled to allow empty fresh startup
 }

@@ -6,6 +6,7 @@ import { Input, Textarea } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { CitationPanel } from './Resources/CitationPanel'
 import {
   Link as LinkIcon,
   Plus,
@@ -22,6 +23,9 @@ import {
 
 export function Resources() {
   const { resources, courses, saveResource, deleteResource } = useAppStore()
+
+  // Selected card for citation panel
+  const [selectedResourceId, setSelectedResourceId] = React.useState<string | null>(null)
 
   // Modal
   const [modalOpen, setModalOpen] = React.useState(false)
@@ -313,6 +317,13 @@ export function Resources() {
                           ))}
                         </div>
                       )}
+
+                      {/* Citation panel expanded */}
+                      {selectedResourceId === res.id && (
+                        <div className="mt-4 pt-4 border-t space-y-3" onClick={(e) => e.stopPropagation()}>
+                          <CitationPanel resource={res} />
+                        </div>
+                      )}
                     </CardContent>
 
                     <CardFooter className="p-3 border-t bg-muted/15 flex justify-between text-xs">
@@ -325,6 +336,9 @@ export function Resources() {
                       )}
                       
                       <div className="flex gap-2">
+                        <Button size="sm" variant={selectedResourceId === res.id ? 'secondary' : 'ghost'} className="p-1 h-7 text-xs flex gap-1 font-bold" onClick={() => setSelectedResourceId(selectedResourceId === res.id ? null : res.id)}>
+                          📚 اقتباس
+                        </Button>
                         <Button size="sm" variant="ghost" className="p-1 h-7 text-xs flex gap-1" onClick={() => openExternalLink(res.url)}>
                           <ExternalLink className="h-3 w-3" /> زيارة الرابط
                         </Button>

@@ -35,6 +35,8 @@ export interface Assignment {
   grade: string
   notes: string
   pdf_path: string
+  kanban_column?: string
+  kanban_order?: number
   created_at?: string
 }
 

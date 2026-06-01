@@ -1,5 +1,6 @@
 import * as React from 'react'
 import { useAppStore, ChatSession, Course, MindMap, WikiPage } from '@/store/useAppStore'
+import { FlashcardReview } from './AIAssistant/FlashcardReview'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input, Textarea } from '@/components/ui/input'
@@ -918,91 +919,16 @@ ${topicsText || 'غير محددة في المنهج'}
 
             {/* Flashcard Review Trainer UI */}
             <div className="lg:col-span-2">
-              <Card className="h-[460px] flex flex-col justify-between">
-                <CardHeader className="py-3 border-b flex flex-row justify-between items-center">
+              <Card className="flex flex-col justify-between">
+                <CardHeader className="py-3 border-b flex flex-row justify-between items-center bg-card">
                   <CardTitle className="text-sm flex items-center gap-2">
                     <BookOpenCheck className="h-5 w-5 text-primary" />
-                    <span>جلسة المذاكرة والتكرار المتباعد (SM-2)</span>
+                    <span>مراجعة البطاقات الذكية وجدولة (FSRS)</span>
                   </CardTitle>
-                  <Button size="sm" variant="ghost" onClick={loadDueFlashcards} className="gap-1 text-xs">
-                    <RefreshCw className="h-3.5 w-3.5" /> تحديث المتراكم
-                  </Button>
                 </CardHeader>
-
-                <CardContent className="flex-1 flex items-center justify-center p-6 bg-muted/20 relative">
-                  {reviewList.length > 0 && activeReviewIdx < reviewList.length ? (
-                    <div className="w-full max-w-md perspective-1000">
-                      {/* Flip card block container */}
-                      <div
-                        onClick={() => setFlipCard(!flipCard)}
-                        className={`relative w-full h-64 bg-card text-card-foreground border rounded-2xl shadow-xl cursor-pointer transform-style-3d transition-transform duration-500 flex items-center justify-center p-6 text-center ${
-                          flipCard ? 'rotate-y-180' : ''
-                        }`}
-                      >
-                        {/* Front Side: Question */}
-                        <div className="absolute inset-0 backface-hidden flex flex-col items-center justify-center p-6 space-y-4">
-                          <Badge variant="warning">السؤال</Badge>
-                          <p className="font-extrabold text-base md:text-lg leading-relaxed text-foreground select-none">
-                            {reviewList[activeReviewIdx].question}
-                          </p>
-                          <span className="text-[10px] text-muted-foreground">انقر لقلب البطاقة ورؤية الإجابة</span>
-                        </div>
-
-                        {/* Back Side: Answer */}
-                        <div className="absolute inset-0 backface-hidden rotate-y-180 flex flex-col items-center justify-center p-6 space-y-4 overflow-y-auto">
-                          <Badge variant="success">الإجابة</Badge>
-                          <p className="font-semibold text-sm leading-relaxed text-muted-foreground select-none">
-                            {reviewList[activeReviewIdx].answer}
-                          </p>
-                          <span className="text-[10px] text-primary">انقر لقلب السؤال مجدداً</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="text-center py-20 text-muted-foreground flex flex-col items-center justify-center">
-                      <Check className="h-16 w-16 text-green-500/80 mb-3 animate-pulse" />
-                      <h4 className="font-black text-foreground">أنت مستعد تماماً!</h4>
-                      <p className="text-xs max-w-xs mt-2">لا توجد بطاقات استذكار مستحقة للمراجعة حالياً. تفقد هذه اللوحة لاحقاً طبقاً لجدولة SM-2 التكرارية.</p>
-                    </div>
-                  )}
+                <CardContent className="p-4 bg-muted/5">
+                  <FlashcardReview />
                 </CardContent>
-
-                {/* Trainer footer scores selectors */}
-                {reviewList.length > 0 && activeReviewIdx < reviewList.length && (
-                  <div className="p-4 border-t bg-card flex flex-col gap-3">
-                    <div className="flex justify-between text-xs text-muted-foreground">
-                      <span>البطاقة الحالية: {activeReviewIdx + 1} من {reviewList.length}</span>
-                      <span>سجل التقدم متباعد دورياً</span>
-                    </div>
-
-                    {flipCard && (
-                      <div className="grid grid-cols-6 gap-1 bg-muted/30 p-2 rounded-xl border border-border">
-                        {[0, 1, 2, 3, 4, 5].map((score) => {
-                          const labels: Record<number, string> = {
-                            0: 'نسيت تماماً (0)',
-                            1: 'صعب جداً (1)',
-                            2: 'غير متأكد (2)',
-                            3: 'تذكرته بصعوبة (3)',
-                            4: 'جيد (4)',
-                            5: 'سهل جداً (5)'
-                          }
-                          return (
-                            <Button
-                              key={score}
-                              size="sm"
-                              variant={score >= 3 ? 'default' : 'outline'}
-                              onClick={() => submitSM2Score(reviewList[activeReviewIdx], score)}
-                              className="text-[9px] py-1 px-0.5 h-8 truncate font-bold"
-                              title={labels[score]}
-                            >
-                              {score}
-                            </Button>
-                          )
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
               </Card>
             </div>
           </div>

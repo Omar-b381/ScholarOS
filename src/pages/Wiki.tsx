@@ -12,6 +12,7 @@ import Table from '@tiptap/extension-table'
 import TableRow from '@tiptap/extension-table-row'
 import TableCell from '@tiptap/extension-table-cell'
 import TableHeader from '@tiptap/extension-table-header'
+import { MermaidExtension } from './Tools/WikiEditor/extensions/MermaidExtension'
 import {
   FileText,
   Plus,
@@ -29,7 +30,8 @@ import {
   Table as TableIcon,
   ImageIcon,
   BookOpen,
-  FolderPlus
+  FolderPlus,
+  GitFork
 } from 'lucide-react'
 
 export function Wiki() {
@@ -59,7 +61,8 @@ export function Wiki() {
       }),
       TableRow,
       TableCell,
-      TableHeader
+      TableHeader,
+      MermaidExtension
     ],
     content: '',
     onUpdate: ({ editor }) => {
@@ -390,6 +393,9 @@ export function Wiki() {
                 </Button>
                 <Button size="sm" variant="ghost" onClick={handleInsertImage} className="p-1 h-7 w-7" title="صورة">
                   <ImageIcon className="h-4 w-4" />
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => editor.chain().focus().insertMermaid().run()} className="p-1 h-7 w-7 text-primary" title="إدراج مخطط">
+                  <GitFork className="h-4 w-4" />
                 </Button>
               </div>
 

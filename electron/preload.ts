@@ -114,6 +114,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getStatus: () => ipcRenderer.invoke('google:getStatus'),
     sync: () => ipcRenderer.invoke('google:sync')
   },
+  // Spaced repetition flashcards (FSRS)
+  db_flashcards_review: (id: string, rating: number) =>
+    ipcRenderer.invoke('db:flashcards:review', { id, rating }),
+  db_flashcards_getDue: () => ipcRenderer.invoke('db:flashcards:getDue'),
+  db_flashcards_getStats: () => ipcRenderer.invoke('db:flashcards:getStats'),
+  // Assignments Kanban Reordering
+  db_assignments_reorder: (items: { id: string; column: string; order: number }[]) =>
+    ipcRenderer.invoke('db:assignments:reorder', items),
+  // Academic citations (citation-js)
+  citation_format: (input: any, format: string) =>
+    ipcRenderer.invoke('citation:format', input, format),
+  citation_fetchDOI: (doi: string) =>
+    ipcRenderer.invoke('citation:fetchDOI', doi),
+  citation_parseBib: (content: string) =>
+    ipcRenderer.invoke('citation:parseBib', content),
+  citation_importBibFile: () =>
+    ipcRenderer.invoke('citation:importBibFile'),
   // Subscribing to main process events
   on: (channel: string, callback: (...args: any[]) => void) => {
     // Exclude channels not prefixed with app logic if needed, but allow simple registration
