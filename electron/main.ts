@@ -347,7 +347,60 @@ function registerIpcHandlers() {
   })
 
   // AI Assistant Call
-  ipcMain.handle('ai:chat', (_, args) => processAIChat(args))
+  ipcMain.handle('ai:chat', async (_, args) => {
+    let dbContext = '\n\n'
+    dbContext += '══════════════════════════════════════════════════\n'
+    dbContext += 'سياق الأجندة والتقويم الحالي للطالب من قاعدة البيانات المحلية لمساعدته:\n'
+    
+    try {
+      const courses = db.prepare("SELECT name, code FROM courses").all() as any[]
+      if (courses.length > 0) {
+        dbContext += '📚 المقررات الدراسية النشطة في جدول الطالب:\n'
+        courses.forEach(c => {
+          dbContext += `- ${c.name} (${c.code || 'بلا رمز'})\n`
+        })
+      }
+      
+      const exams = db.prepare(`
+        SELECT title, start_date, description FROM events 
+        WHERE (type = 'Exam' OR title LIKE '%امتحان%' OR title LIKE '%اختبار%' OR title LIKE '%كويز%' OR title LIKE '%quiz%')
+        AND start_date >= datetime('now')
+        ORDER BY start_date ASC LIMIT 10
+      `).all() as any[]
+      if (exams.length > 0) {
+        dbContext += '\n📅 الامتحانات والكويزات القادمة المقررة في تقويمه:\n'
+        exams.forEach(e => {
+          dbContext += `- امتحان: ${e.title} في تاريخ ${e.start_date.slice(0, 16).replace('T', ' ')} (${e.description || 'بلا وصف'})\n`
+        })
+      }
+
+      const assignments = db.prepare(`
+        SELECT title, due_date FROM assignments 
+        WHERE status != 'submitted' AND status != 'graded' AND status != 'completed'
+        ORDER BY due_date ASC LIMIT 10
+      `).all() as any[]
+      if (assignments.length > 0) {
+        dbContext += '\n✏️ الواجبات والتسليمات الأكاديمية المعلقة (غير المنجزة):\n'
+        assignments.forEach(a => {
+          dbContext += `- واجب: ${a.title} - موعد التسليم النهائي: ${a.due_date.slice(0, 16).replace('T', ' ')}\n`
+        })
+      }
+      
+      // Propose AI study schedule reminders
+      if (exams.length > 0) {
+        dbContext += '\n💡 تنويه لمساعد الذكاء الاصطناعي:\n'
+        dbContext += 'إذا سألك الطالب عن امتحاناته أو كيفية الاستعداد لها، بادر باقتراح توليد جدول مذاكرة ذكي بالتكرار المتباعد (Spaced Repetition) من خلال شاشة "جدول المذاكرة الذكي" المخصصة لذلك في التطبيق! وساعده في التخطيط الأولي لها هنا.\n'
+      }
+    } catch (dbErr) {
+      console.error('Failed to query DB context for AI chat', dbErr)
+    }
+    dbContext += '══════════════════════════════════════════════════\n\n'
+
+    // Inject the structured local database context securely at the end of the system prompt
+    args.systemPrompt = (args.systemPrompt || '') + dbContext
+
+    return processAIChat(args)
+  })
 
   // Notion Integration
   ipcMain.handle('notion:syncEvents', () => syncEventsToNotion())

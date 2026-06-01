@@ -65,8 +65,7 @@ async function checkDueNotifications(webContents?: any) {
   const notify24h = store.get('settings.notifications.notify24h', true) as boolean
   const notify1h = store.get('settings.notifications.notify1h', true) as boolean
 
-  if (!notify24h && !notify1h) return
-
+  // Get active configurations, we always enable smart exam notifications if notifications are globally enabled
   const now = new Date()
   const thirtyDaysLater = new Date()
   thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30)
@@ -76,7 +75,7 @@ async function checkDueNotifications(webContents?: any) {
   const logs = getNotificationLogs()
 
   // Helper to check if log exists
-  const hasLogged = (eventId: string, type: '24h' | '1h') => {
+  const hasLogged = (eventId: string, type: string) => {
     return logs.some((log: any) => log.event_id === eventId && log.type === type)
   }
 
@@ -85,19 +84,41 @@ async function checkDueNotifications(webContents?: any) {
     const diffMs = eventTime.getTime() - now.getTime()
     const diffHours = diffMs / (1000 * 60 * 60)
 
-    // Check for 24h notification (between 23 and 25 hours before, and not logged yet)
+    const isExam = event.type === 'Exam' || /امتحان|اختبار|كويز|quiz|exam/i.test(event.title || '')
+
+    // 1. Smart Exam Reminders (7 Days before the exam)
+    if (isExam && diffHours > 165 && diffHours <= 169 && !hasLogged(event.id, '7d')) {
+      sendNotification(
+        event, 
+        '7d', 
+        `⚠️ اقتراب الامتحان: متبقي 7 أيام على اختبار "${event.title}"! نقترح عليك فتح المساعد والبدء في توليد جدول مذاكرة ذكي بالتكرار المتباعد الآن 🚀`, 
+        webContents
+      )
+    }
+
+    // 2. Smart Exam Reminders (3 Days before the exam)
+    if (isExam && diffHours > 69 && diffHours <= 73 && !hasLogged(event.id, '3d')) {
+      sendNotification(
+        event, 
+        '3d', 
+        `⏰ تذكير دراسي: متبقي 3 أيام فقط على اختبار "${event.title}". تفقد خطتك الدراسية وبطاقات التكرار المتباعد لتثبيت معلوماتك!`, 
+        webContents
+      )
+    }
+
+    // 3. Check for 24h notification (between 23 and 25 hours before, and not logged yet)
     if (notify24h && diffHours > 23 && diffHours <= 25 && !hasLogged(event.id, '24h')) {
       sendNotification(event, '24h', `📅 غداً: ${event.title}`, webContents)
     }
 
-    // Check for 1h notification (between 0.75 and 1.25 hours before, and not logged yet)
+    // 4. Check for 1h notification (between 0.75 and 1.25 hours before, and not logged yet)
     if (notify1h && diffHours > 0.75 && diffHours <= 1.25 && !hasLogged(event.id, '1h')) {
       sendNotification(event, '1h', `⏰ بعد ساعة: ${event.title}`, webContents)
     }
   }
 }
 
-function sendNotification(event: any, type: '24h' | '1h', message: string, webContents?: any) {
+function sendNotification(event: any, type: string, message: string, webContents?: any) {
   const uuid = require('uuid').v4()
   const nowStr = new Date().toISOString()
 
