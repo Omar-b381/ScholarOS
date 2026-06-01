@@ -131,6 +131,62 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('citation:parseBib', content),
   citation_importBibFile: () =>
     ipcRenderer.invoke('citation:importBibFile'),
+
+  // ── Attendance ──────────────────────────────────────
+  attendance_getAll:        (courseId?: string) =>
+    ipcRenderer.invoke('attendance:getAll', courseId),
+  attendance_save:          (record: any) =>
+    ipcRenderer.invoke('attendance:save', record),
+  attendance_getStats:      (courseId: string) =>
+    ipcRenderer.invoke('attendance:getStats', courseId),
+
+  // ── Habits ──────────────────────────────────────────
+  habits_getAll:            () => ipcRenderer.invoke('habits:getAll'),
+  habits_save:              (habit: any) => ipcRenderer.invoke('habits:save', habit),
+  habits_delete:            (id: string) => ipcRenderer.invoke('habits:delete', id),
+  habits_log:               (habitId: string, date: string, completed: boolean) =>
+    ipcRenderer.invoke('habits:log', { habitId, date, completed }),
+  habits_getHeatmap:        (habitId: string, days: number) =>
+    ipcRenderer.invoke('habits:getHeatmap', { habitId, days }),
+
+  // ── Research Papers (Semantic Scholar + CrossRef) ────
+  research_searchPapers:    (query: string) =>
+    ipcRenderer.invoke('research:searchPapers', query),
+  research_fetchByDOI:      (doi: string) =>
+    ipcRenderer.invoke('research:fetchByDOI', doi),
+  research_searchBooks:     (query: string) =>
+    ipcRenderer.invoke('research:searchBooks', query),
+  research_saveBook:        (book: any) =>
+    ipcRenderer.invoke('research:saveBook', book),
+  research_getSavedBooks:   () => ipcRenderer.invoke('research:getSavedBooks'),
+
+  // ── Formula Sheet ────────────────────────────────────
+  formulas_getAll:          () => ipcRenderer.invoke('formulas:getAll'),
+  formulas_save:            (sheet: any) => ipcRenderer.invoke('formulas:save', sheet),
+  formulas_delete:          (id: string) => ipcRenderer.invoke('formulas:delete', id),
+  formulas_exportPDF:       (id: string) => ipcRenderer.invoke('formulas:exportPDF', id),
+
+  // ── Focus Mode (Pomodoro) ────────────────────────────
+  focus_start:              (duration: number, breakMin: number) =>
+    ipcRenderer.invoke('focus:start', { duration, breakMin }),
+  focus_complete:           (id: string) => ipcRenderer.invoke('focus:complete', id),
+  focus_getHistory:         () => ipcRenderer.invoke('focus:getHistory'),
+  focus_getStats:           () => ipcRenderer.invoke('focus:getStats'),
+
+  // ── Grade Predictor ──────────────────────────────────
+  grades_getInputs:         (courseId: string) =>
+    ipcRenderer.invoke('grades:getInputs', courseId),
+  grades_saveInput:         (input: any) =>
+    ipcRenderer.invoke('grades:saveInput', input),
+  grades_deleteInput:       (id: string) =>
+    ipcRenderer.invoke('grades:deleteInput', id),
+
+  // ── Study Schedule Generator ─────────────────────────
+  schedule_generate:        (payload: any) =>
+    ipcRenderer.invoke('schedule:generate', payload),
+  schedule_getAll:          () => ipcRenderer.invoke('schedule:getAll'),
+  schedule_delete:          (id: string) => ipcRenderer.invoke('schedule:delete', id),
+
   // Subscribing to main process events
   on: (channel: string, callback: (...args: any[]) => void) => {
     // Exclude channels not prefixed with app logic if needed, but allow simple registration

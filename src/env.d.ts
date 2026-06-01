@@ -126,5 +126,46 @@ interface Window {
     citation_fetchDOI: (doi: string) => Promise<any>;
     citation_parseBib: (content: string) => Promise<any[]>;
     citation_importBibFile: () => Promise<any[]>;
+
+    // Attendance
+    attendance_getAll: (courseId?: string) => Promise<any[]>;
+    attendance_save: (record: any) => Promise<any>;
+    attendance_getStats: (courseId: string) => Promise<{ total: number; present: number; absent: number; excused: number; percentage: number; warning: boolean }>;
+
+    // Habits
+    habits_getAll: () => Promise<any[]>;
+    habits_save: (habit: any) => Promise<any>;
+    habits_delete: (id: string) => Promise<{ ok: boolean }>;
+    habits_log: (habitId: string, date: string, completed: boolean) => Promise<{ ok: boolean }>;
+    habits_getHeatmap: (habitId: string, days: number) => Promise<any[]>;
+
+    // Research Papers
+    research_searchPapers: (query: string) => Promise<{ papers: any[]; error: string | null }>;
+    research_fetchByDOI: (doi: string) => Promise<{ error: string | null; data: any }>;
+    research_searchBooks: (query: string) => Promise<{ books: any[]; error: string | null }>;
+    research_saveBook: (book: any) => Promise<{ ok: boolean; id: string }>;
+    research_getSavedBooks: () => Promise<any[]>;
+
+    // Formula Sheets
+    formulas_getAll: () => Promise<any[]>;
+    formulas_save: (sheet: any) => Promise<any>;
+    formulas_delete: (id: string) => Promise<{ ok: boolean }>;
+    formulas_exportPDF: (id: string) => Promise<string>;
+
+    // Focus Sessions
+    focus_start: (duration: number, breakMin: number) => Promise<{ id: string }>;
+    focus_complete: (id: string) => Promise<{ ok: boolean }>;
+    focus_getHistory: () => Promise<any[]>;
+    focus_getStats: () => Promise<{ totalSessions: number; totalMinutes: number; todayMinutes: number }>;
+
+    // Grade Predictor
+    grades_getInputs: (courseId: string) => Promise<any[]>;
+    grades_saveInput: (input: any) => Promise<{ ok: boolean; id: string }>;
+    grades_deleteInput: (id: string) => Promise<{ ok: boolean }>;
+
+    // Study Schedule Generator
+    schedule_generate: (payload: any) => Promise<{ schedule: any; error: string | null }>;
+    schedule_getAll: () => Promise<any[]>;
+    schedule_delete: (id: string) => Promise<{ ok: boolean }>;
   };
 }

@@ -18,6 +18,11 @@ import { Settings } from '@/pages/Settings'
 import { Admin } from '@/pages/Admin'
 import { NotebookLM } from '@/pages/NotebookLM'
 import { Focus } from '@/pages/Focus'
+import { AttendancePage } from '@/pages/Attendance'
+import { HabitsPage } from '@/pages/Habits'
+import { ResearchPage } from '@/pages/Research'
+import { FormulaSheetPage } from '@/pages/FormulaSheet'
+import { StudySchedulePage } from '@/pages/StudySchedule'
 
 export default function App() {
   const { activePage, loadAllData, isLoading } = useAppStore()
@@ -97,6 +102,16 @@ export default function App() {
         return <NotebookLM />
       case 'focus':
         return <Focus />
+      case 'attendance':
+        return <AttendancePage />
+      case 'habits':
+        return <HabitsPage />
+      case 'research':
+        return <ResearchPage />
+      case 'formulas':
+        return <FormulaSheetPage />
+      case 'schedule':
+        return <StudySchedulePage />
       default:
         return <Dashboard />
     }

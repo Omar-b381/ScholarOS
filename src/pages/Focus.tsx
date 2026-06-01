@@ -31,6 +31,27 @@ interface Achievement {
 }
 
 export function Focus() {
+  // === Database Pomodoro Sessions States ===
+  const [currentDbSessionId, setCurrentDbSessionId] = React.useState<string | null>(null)
+  const [dbStats, setDbStats] = React.useState<{ totalSessions: number; totalMinutes: number; todayMinutes: number }>({
+    totalSessions: 0,
+    totalMinutes: 0,
+    todayMinutes: 0
+  })
+
+  const loadStatsFromDb = React.useCallback(async () => {
+    try {
+      const s = await window.electronAPI.focus_getStats()
+      setDbStats(s)
+    } catch (e) {
+      console.error(e)
+    }
+  }, [])
+
+  React.useEffect(() => {
+    loadStatsFromDb()
+  }, [loadStatsFromDb])
+
   // === Timer States ===
   const [timerType, setTimerType] = React.useState<'focus' | 'shortBreak' | 'longBreak'>('focus')
   const [timeLeft, setTimeLeft] = React.useState(25 * 60) // 25 minutes default
@@ -41,6 +62,19 @@ export function Focus() {
   const [focusDur, setFocusDur] = React.useState(25)
   const [shortDur, setShortDur] = React.useState(5)
   const [longDur, setLongDur] = React.useState(15)
+
+  const handleToggleTimer = async () => {
+    const nextRunning = !isRunning
+    setIsRunning(nextRunning)
+    if (nextRunning && timerType === 'focus' && timeLeft === focusDur * 60) {
+      try {
+        const res = await window.electronAPI.focus_start(focusDur, shortDur)
+        setCurrentDbSessionId(res.id)
+      } catch (err) {
+        console.error(err)
+      }
+    }
+  }
 
   // === Ambient Sound Multi-Channel State ===
   const [ambientMix, setAmbientMix] = React.useState<Record<'lofi' | 'rain' | 'library' | 'nature', { active: boolean; volume: number }>>({
@@ -203,6 +237,9 @@ export function Focus() {
     ding.play().catch(() => {})
 
     if (timerType === 'focus') {
+      if (currentDbSessionId) {
+        window.electronAPI.focus_complete(currentDbSessionId).then(loadStatsFromDb).catch(console.error)
+      }
       const newSessions = sessionsCompleted + 1
       const newXp = xp + 100 // +100 XP per Focus Session!
       
@@ -389,8 +426,12 @@ export function Focus() {
                   <span className="text-lg font-black font-mono text-primary">{sessionsCompleted}</span>
                 </div>
                 <div className="p-2.5 rounded-xl border bg-card/60 text-center space-y-0.5">
-                  <span className="text-[10px] font-bold text-muted-foreground block">إجمالي دقائق التركيز</span>
-                  <span className="text-lg font-black font-mono text-primary">{sessionsCompleted * 25} د</span>
+                  <span className="text-[10px] font-bold text-muted-foreground block">دقائق التركيز اليوم</span>
+                  <span className="text-lg font-black font-mono text-primary">{dbStats.todayMinutes} د</span>
+                </div>
+                <div className="p-2.5 rounded-xl border bg-card/60 text-center col-span-2 space-y-0.5">
+                  <span className="text-[10px] font-bold text-muted-foreground block">إجمالي دقائق التركيز (قاعدة البيانات)</span>
+                  <span className="text-lg font-black font-mono text-primary">{dbStats.totalMinutes} دقيقة</span>
                 </div>
               </div>
             </CardContent>
@@ -554,7 +595,7 @@ export function Focus() {
             <div className="flex gap-3 justify-center w-full">
               <Button 
                 id="btn_timer_toggle"
-                onClick={() => setIsRunning(!isRunning)} 
+                onClick={handleToggleTimer} 
                 className="flex-1 font-bold shadow-md hover:shadow-lg transition-all h-10 gap-1 text-xs"
               >
                 {isRunning ? (

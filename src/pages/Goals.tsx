@@ -48,11 +48,66 @@ export function Goals() {
 
   const activeGoal = goals.find(g => g.id === selectedGoalId) || goals[0]
 
+  // === Grade Predictor States ===
+  const [predCourseId, setPredCourseId] = React.useState('')
+  const [predInputs, setPredInputs] = React.useState<any[]>([])
+  const [newComp, setNewComp] = React.useState('')
+  const [newWeight, setNewWeight] = React.useState('20')
+  const [newScore, setNewScore] = React.useState('')
+  const [newMax, setNewMax] = React.useState('100')
+
   React.useEffect(() => {
     if (!selectedGoalId && goals.length > 0) {
       setSelectedGoalId(goals[0].id)
     }
   }, [goals])
+
+  React.useEffect(() => {
+    if (predCourseId) {
+      window.electronAPI.grades_getInputs(predCourseId).then(setPredInputs).catch(console.error)
+    } else {
+      setPredInputs([])
+    }
+  }, [predCourseId])
+
+  const handleSaveGradeInput = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!predCourseId || !newComp || !newWeight || !newScore) return
+
+    await window.electronAPI.grades_saveInput({
+      course_id: predCourseId,
+      component: newComp,
+      weight: parseFloat(newWeight),
+      score: parseFloat(newScore),
+      max_score: parseFloat(newMax)
+    })
+    
+    setNewComp('')
+    setNewScore('')
+    // Reload
+    const list = await window.electronAPI.grades_getInputs(predCourseId)
+    setPredInputs(list)
+  }
+
+  const handleDeleteGradeInput = async (id: string) => {
+    if (confirm('هل تريد حذف هذا التقييم الدراسي؟')) {
+      await window.electronAPI.grades_deleteInput(id)
+      const list = await window.electronAPI.grades_getInputs(predCourseId)
+      setPredInputs(list)
+    }
+  }
+
+  const getGpaLetter = (pct: number) => {
+    if (pct >= 95) return { letter: 'A+ (امتياز مرتفع)', gpa: 4.00, color: 'text-green-600 font-extrabold' }
+    if (pct >= 90) return { letter: 'A (امتياز)', gpa: 3.75, color: 'text-green-500 font-extrabold' }
+    if (pct >= 85) return { letter: 'B+ (جيد جداً مرتفع)', gpa: 3.50, color: 'text-blue-600 font-bold' }
+    if (pct >= 80) return { letter: 'B (جيد جداً)', gpa: 3.00, color: 'text-blue-500 font-bold' }
+    if (pct >= 75) return { letter: 'C+ (جيد مرتفع)', gpa: 2.50, color: 'text-yellow-600 font-semibold' }
+    if (pct >= 70) return { letter: 'C (جيد)', gpa: 2.00, color: 'text-yellow-500 font-semibold' }
+    if (pct >= 65) return { letter: 'D+ (مقبول مرتفع)', gpa: 1.50, color: 'text-orange-600' }
+    if (pct >= 60) return { letter: 'D (مقبول)', gpa: 1.00, color: 'text-orange-500' }
+    return { letter: 'F (راسب)', gpa: 0.00, color: 'text-red-500 font-black' }
+  }
 
   // Cumulative GPA Calculations
   const totalCredits = grades.reduce((sum, g) => sum + g.credit_hours, 0)
@@ -442,6 +497,123 @@ export function Goals() {
                 })}
               </TableBody>
             </Table>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Grade Predictor Card */}
+      <Card>
+        <CardHeader className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary animate-pulse" />
+              <span>حاسبة المعدل المتوقع ومحاكي الدرجات (Grade Predictor) 🎓</span>
+            </CardTitle>
+            <CardDescription>أدخل توزيع أوزان درجات موادك (مثال: نصفي 30%، نهائي 50%) لمعرفة توقعات معدلك التراكمي</CardDescription>
+          </div>
+          <div className="w-56">
+            <Select value={predCourseId} onChange={e => setPredCourseId(e.target.value)}>
+              <option value="">اختر المقرّر...</option>
+              {courses.map(c => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </Select>
+          </div>
+        </CardHeader>
+        <CardContent>
+          {predCourseId ? (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              {/* Form and list */}
+              <div className="lg:col-span-2 space-y-4">
+                <form onSubmit={handleSaveGradeInput} className="grid grid-cols-4 gap-3 bg-muted/20 p-3 rounded-xl border items-end">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-muted-foreground">التقييم (مثال: Midterm)</label>
+                    <Input required placeholder="نصفي، واجب، نهائي..." value={newComp} onChange={e => setNewComp(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-muted-foreground">الوزن الكلي (%)</label>
+                    <Input type="number" required placeholder="مثال: 30" value={newWeight} onChange={e => setNewWeight(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-muted-foreground">الدرجة الحاصل عليها</label>
+                    <Input type="number" step="0.1" required placeholder="مثال: 28" value={newScore} onChange={e => setNewScore(e.target.value)} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-muted-foreground">الدرجة الكبرى للتقييم</label>
+                    <Input type="number" required placeholder="مثال: 30" value={newMax} onChange={e => setNewMax(e.target.value)} />
+                  </div>
+                  <Button type="submit" className="col-span-4 mt-2 font-bold" size="sm">إضافة عنصر الدرجة</Button>
+                </form>
+
+                {/* Elements list */}
+                {predInputs.length === 0 ? (
+                  <p className="text-xs text-muted-foreground text-center py-6">لم يتم إضافة تقييمات لهذا المقرر بعد. ابدأ بإدخالها بالأعلى.</p>
+                ) : (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>التقييم</TableHead>
+                        <TableHead>الوزن</TableHead>
+                        <TableHead>الدرجة المستحقة</TableHead>
+                        <TableHead>النسبة الحاصل عليها</TableHead>
+                        <TableHead className="text-left">العمليات</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {predInputs.map(input => {
+                        const pct = input.max_score > 0 ? (input.score / input.max_score) * 100 : 0
+                        const contrib = (input.score / input.max_score) * input.weight
+                        return (
+                          <TableRow key={input.id}>
+                            <TableCell className="font-bold text-xs">{input.component}</TableCell>
+                            <TableCell className="text-xs">{input.weight}%</TableCell>
+                            <TableCell className="text-xs font-mono">{input.score} / {input.max_score}</TableCell>
+                            <TableCell className="text-xs font-mono font-bold text-primary">{contrib.toFixed(1)}% من {input.weight}%</TableCell>
+                            <TableCell className="text-left">
+                              <Button size="sm" variant="ghost" className="text-destructive p-1" onClick={() => handleDeleteGradeInput(input.id)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                )}
+              </div>
+
+              {/* Prediction results */}
+              <div className="lg:col-span-1 border rounded-xl p-4 bg-muted/10 space-y-4 flex flex-col justify-center text-center">
+                {(() => {
+                  const totalWeight = predInputs.reduce((sum, i) => sum + i.weight, 0)
+                  const totalEarned = predInputs.reduce((sum, i) => sum + ((i.score / i.max_score) * i.weight), 0)
+                  const normalizedPct = totalWeight > 0 ? (totalEarned / totalWeight) * 100 : 0
+                  const prediction = getGpaLetter(normalizedPct)
+
+                  return (
+                    <>
+                      <div>
+                        <span className="text-xs font-bold text-muted-foreground">مجموع أوزان التقييمات المدخلة</span>
+                        <p className="text-2xl font-black text-foreground">{totalWeight}% من 100%</p>
+                      </div>
+                      <div className="border-t pt-3">
+                        <span className="text-xs font-bold text-muted-foreground">النسبة المكتسبة التقديرية</span>
+                        <p className="text-3xl font-black text-primary">{totalEarned.toFixed(1)}%</p>
+                      </div>
+                      <div className="border-t pt-3">
+                        <span className="text-xs font-bold text-muted-foreground">الدرجة والـ GPA المتوقع</span>
+                        <p className={`text-xl font-black ${prediction.color} mt-1`}>{prediction.letter}</p>
+                        <p className="text-xs font-black text-muted-foreground mt-1">النقاط المقابلة: {prediction.gpa.toFixed(2)}</p>
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+            </div>
+          ) : (
+            <div className="text-center py-10 text-muted-foreground text-xs">
+              يرجى تحديد مقرر دراسي من القائمة المنسدلة بالأعلى للبدء في تتبع درجاتك الفردية ومحاكاتها.
+            </div>
           )}
         </CardContent>
       </Card>

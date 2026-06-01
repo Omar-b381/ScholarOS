@@ -434,4 +434,411 @@ function registerIpcHandlers() {
     const content = require('fs').readFileSync(result.filePaths[0], 'utf-8')
     return parseBibFile(content)
   })
+
+  // ═══════════════════════════════════════════════════
+  // ATTENDANCE
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('attendance:getAll', (_e, courseId?: string) => {
+    if (courseId) {
+      return db.prepare('SELECT * FROM attendance WHERE course_id = ? ORDER BY date DESC').all(courseId)
+    }
+    return db.prepare('SELECT * FROM attendance ORDER BY date DESC').all()
+  })
+
+  ipcMain.handle('attendance:save', (_e, record: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = record.id || uuidv4()
+    db.prepare(`
+      INSERT INTO attendance (id, course_id, date, status, notes)
+      VALUES (@id, @course_id, @date, @status, @notes)
+      ON CONFLICT(id) DO UPDATE SET
+        status = excluded.status,
+        notes  = excluded.notes
+    `).run({ notes: '', ...record, id })
+    return db.prepare('SELECT * FROM attendance WHERE id = ?').get(id)
+  })
+
+  ipcMain.handle('attendance:getStats', (_e, courseId: string) => {
+    const rows = db.prepare(
+      'SELECT status, COUNT(*) as count FROM attendance WHERE course_id = ? GROUP BY status'
+    ).all(courseId) as any[]
+    const total   = rows.reduce((s, r) => s + r.count, 0)
+    const present = rows.find(r => r.status === 'present')?.count ?? 0
+    const absent  = rows.find(r => r.status === 'absent')?.count ?? 0
+    const excused = rows.find(r => r.status === 'excused')?.count ?? 0
+    const pct     = total > 0 ? Math.round((present / total) * 100) : 100
+    return { total, present, absent, excused, percentage: pct, warning: pct < 75 }
+  })
+
+  // ═══════════════════════════════════════════════════
+  // HABITS
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('habits:getAll', () =>
+    db.prepare('SELECT * FROM habits ORDER BY created_at ASC').all()
+  )
+
+  ipcMain.handle('habits:save', (_e, habit: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = habit.id || uuidv4()
+    db.prepare(`
+      INSERT INTO habits (id, title, icon, color, target_days)
+      VALUES (@id, @title, @icon, @color, @target_days)
+      ON CONFLICT(id) DO UPDATE SET
+        title       = excluded.title,
+        icon        = excluded.icon,
+        color       = excluded.color,
+        target_days = excluded.target_days
+    `).run({ icon: '📚', color: '#6d28d9', target_days: 7, ...habit, id })
+    return db.prepare('SELECT * FROM habits WHERE id = ?').get(id)
+  })
+
+  ipcMain.handle('habits:delete', (_e, id: string) => {
+    db.prepare('DELETE FROM habit_logs WHERE habit_id = ?').run(id)
+    db.prepare('DELETE FROM habits WHERE id = ?').run(id)
+    return { ok: true }
+  })
+
+  ipcMain.handle('habits:log', (_e, { habitId, date, completed }: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    db.prepare(`
+      INSERT INTO habit_logs (id, habit_id, date, completed)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(habit_id, date) DO UPDATE SET completed = excluded.completed
+    `).run(uuidv4(), habitId, date, completed ? 1 : 0)
+    return { ok: true }
+  })
+
+  ipcMain.handle('habits:getHeatmap', (_e, { habitId, days }: any) => {
+    const rows = db.prepare(`
+      SELECT date, completed FROM habit_logs
+      WHERE habit_id = ?
+      ORDER BY date ASC
+      LIMIT ?
+    `).all(habitId, days) as any[]
+    return rows
+  })
+
+  // ═══════════════════════════════════════════════════
+  // RESEARCH (Semantic Scholar + CrossRef + Open Library)
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('research:searchPapers', async (_e, query: string) => {
+    // Check cache first (1 hour TTL)
+    const cacheKey = `papers_${query}`
+    const cached = db.prepare(
+      "SELECT results, fetched_at FROM research_cache WHERE id = ?"
+    ).get(cacheKey) as any
+    if (cached) {
+      const age = Date.now() - new Date(cached.fetched_at).getTime()
+      if (age < 3600000) return JSON.parse(cached.results) // return if < 1hr old
+    }
+
+    try {
+      const url = `https://api.semanticscholar.org/graph/v1/paper/search?` +
+        `query=${encodeURIComponent(query)}&limit=10&` +
+        `fields=paperId,title,authors,year,abstract,citationCount,openAccessPdf,externalIds`
+
+      const res  = await fetch(url, {
+        headers: { 'User-Agent': 'ScholarOS/1.0 (scholaros@app.com)' }
+      })
+
+      if (res.status === 429) {
+        return { error: 'تجاوزت الحد المسموح — انتظر دقيقة ثم حاول مجدداً', papers: [] }
+      }
+
+      const json = await res.json() as any
+      const papers = (json.data ?? []).map((p: any) => ({
+        id:           p.paperId,
+        title:        p.title,
+        authors:      p.authors?.map((a: any) => a.name).join('، ') ?? '',
+        year:         p.year,
+        abstract:     p.abstract ?? '',
+        citations:    p.citationCount ?? 0,
+        pdfUrl:       p.openAccessPdf?.url ?? null,
+        doi:          p.externalIds?.DOI ?? null,
+      }))
+
+      // Cache result
+      db.prepare(`
+        INSERT INTO research_cache (id, query, source, results)
+        VALUES (?, ?, 'semantic_scholar', ?)
+        ON CONFLICT(id) DO UPDATE SET results = excluded.results, fetched_at = CURRENT_TIMESTAMP
+      `).run(cacheKey, query, JSON.stringify(papers))
+
+      return { papers, error: null }
+    } catch (e: any) {
+      return { papers: [], error: 'تعذّر الاتصال بقاعدة البيانات الأكاديمية' }
+    }
+  })
+
+  ipcMain.handle('research:fetchByDOI', async (_e, doi: string) => {
+    try {
+      const res  = await fetch(
+        `https://api.crossref.org/works/${encodeURIComponent(doi)}?mailto=scholaros@app.com`,
+        { headers: { 'User-Agent': 'ScholarOS/1.0' } }
+      )
+      if (!res.ok) return { error: 'لم يُعثر على هذا الـ DOI', data: null }
+      const json = await res.json() as any
+      const w    = json.message
+      return {
+        error: null,
+        data: {
+          title:   w.title?.[0] ?? '',
+          authors: w.author?.map((a: any) => `${a.given ?? ''} ${a.family ?? ''}`).join('، ') ?? '',
+          year:    w.published?.['date-parts']?.[0]?.[0] ?? '',
+          journal: w['container-title']?.[0] ?? '',
+          doi:     w.DOI ?? '',
+          url:     w.URL ?? '',
+          abstract: w.abstract ?? '',
+        }
+      }
+    } catch {
+      return { error: 'حدث خطأ في الاتصال', data: null }
+    }
+  })
+
+  ipcMain.handle('research:searchBooks', async (_e, query: string) => {
+    const cacheKey = `books_${query}`
+    const cached = db.prepare(
+      "SELECT results, fetched_at FROM research_cache WHERE id = ?"
+    ).get(cacheKey) as any
+    if (cached) {
+      const age = Date.now() - new Date(cached.fetched_at).getTime()
+      if (age < 86400000) return JSON.parse(cached.results) // 24hr cache for books
+    }
+
+    try {
+      const res  = await fetch(
+        `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=10&fields=key,title,author_name,first_publish_year,isbn,cover_i`,
+        { headers: { 'User-Agent': 'ScholarOS/1.0 (scholaros@app.com)' } }
+      )
+      const json = await res.json() as any
+      const books = (json.docs ?? []).map((b: any) => ({
+        olKey:    b.key,
+        title:    b.title ?? '',
+        author:   b.author_name?.[0] ?? '',
+        year:     b.first_publish_year ?? '',
+        isbn:     b.isbn?.[0] ?? '',
+        coverUrl: b.cover_i
+          ? `https://covers.openlibrary.org/b/id/${b.cover_i}-M.jpg`
+          : null,
+      }))
+
+      db.prepare(`
+        INSERT INTO research_cache (id, query, source, results)
+        VALUES (?, ?, 'open_library', ?)
+        ON CONFLICT(id) DO UPDATE SET results = excluded.results, fetched_at = CURRENT_TIMESTAMP
+      `).run(cacheKey, query, JSON.stringify(books))
+
+      return { books, error: null }
+    } catch {
+      return { books: [], error: 'تعذّر الاتصال بمكتبة الكتب' }
+    }
+  })
+
+  ipcMain.handle('research:saveBook', (_e, book: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = uuidv4()
+    db.prepare(`
+      INSERT INTO book_references (id, isbn, title, author, year, cover_url, ol_key, course_id, notes)
+      VALUES (@id, @isbn, @title, @author, @year, @cover_url, @ol_key, @course_id, @notes)
+    `).run({
+      isbn: null,
+      author: null,
+      year: null,
+      cover_url: null,
+      ol_key: null,
+      course_id: null,
+      notes: null,
+      ...book,
+      id
+    })
+    return { ok: true, id }
+  })
+
+  ipcMain.handle('research:getSavedBooks', () =>
+    db.prepare('SELECT * FROM book_references ORDER BY created_at DESC').all()
+  )
+
+  // ═══════════════════════════════════════════════════
+  // FORMULA SHEET
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('formulas:getAll', () =>
+    db.prepare('SELECT * FROM formula_sheets ORDER BY updated_at DESC').all()
+  )
+
+  ipcMain.handle('formulas:save', (_e, sheet: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = sheet.id || uuidv4()
+    const now = new Date().toISOString()
+    db.prepare(`
+      INSERT INTO formula_sheets (id, course_id, title, formulas, created_at, updated_at)
+      VALUES (@id, @course_id, @title, @formulas, @now, @now)
+      ON CONFLICT(id) DO UPDATE SET
+        title     = excluded.title,
+        formulas  = excluded.formulas,
+        course_id = excluded.course_id,
+        updated_at = excluded.updated_at
+    `).run({
+      course_id: null,
+      ...sheet,
+      id,
+      formulas: typeof sheet.formulas === 'string' ? sheet.formulas : JSON.stringify(sheet.formulas),
+      now,
+    })
+    return db.prepare('SELECT * FROM formula_sheets WHERE id = ?').get(id)
+  })
+
+  ipcMain.handle('formulas:delete', (_e, id: string) => {
+    db.prepare('DELETE FROM formula_sheets WHERE id = ?').run(id)
+    return { ok: true }
+  })
+
+  ipcMain.handle('formulas:exportPDF', async (_e, id: string) => {
+    const sheet = db.prepare('SELECT * FROM formula_sheets WHERE id = ?').get(id) as any
+    if (!sheet) throw new Error('Formula sheet not found')
+    const win = BrowserWindow.getAllWindows()[0]
+    const pdfBuffer = await win.webContents.printToPDF({ printBackground: true })
+    const path = require('path')
+    const app  = require('electron').app
+    const dest = path.join(app.getPath('userData'), 'documents', `formulas_${id}.pdf`)
+    require('fs').writeFileSync(dest, pdfBuffer)
+    return dest
+  })
+
+  // ═══════════════════════════════════════════════════
+  // FOCUS MODE
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('focus:start', (_e, { duration, breakMin }: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = uuidv4()
+    db.prepare(`
+      INSERT INTO focus_sessions (id, duration_minutes, break_minutes, started_at)
+      VALUES (?, ?, ?, datetime('now'))
+    `).run(id, duration, breakMin)
+    return { id }
+  })
+
+  ipcMain.handle('focus:complete', (_e, id: string) => {
+    db.prepare(`
+      UPDATE focus_sessions SET completed = 1, ended_at = datetime('now') WHERE id = ?
+    `).run(id)
+    return { ok: true }
+  })
+
+  ipcMain.handle('focus:getHistory', () =>
+    db.prepare('SELECT * FROM focus_sessions ORDER BY started_at DESC LIMIT 30').all()
+  )
+
+  ipcMain.handle('focus:getStats', () => {
+    const total     = (db.prepare('SELECT COUNT(*) as c FROM focus_sessions WHERE completed = 1').get() as any).c
+    const minutes   = (db.prepare('SELECT SUM(duration_minutes) as s FROM focus_sessions WHERE completed = 1').get() as any).s ?? 0
+    const todayMin  = (db.prepare(`
+      SELECT SUM(duration_minutes) as s FROM focus_sessions
+      WHERE completed = 1 AND date(started_at) = date('now')
+    `).get() as any).s ?? 0
+    return { totalSessions: total, totalMinutes: minutes, todayMinutes: todayMin }
+  })
+
+  // ═══════════════════════════════════════════════════
+  // GRADE PREDICTOR
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('grades:getInputs', (_e, courseId: string) =>
+    db.prepare('SELECT * FROM grade_inputs WHERE course_id = ? ORDER BY created_at ASC').all(courseId)
+  )
+
+  ipcMain.handle('grades:saveInput', (_e, input: any) => {
+    const { v4: uuidv4 } = require('uuid')
+    const id = input.id || uuidv4()
+    db.prepare(`
+      INSERT INTO grade_inputs (id, course_id, component, weight, score, max_score)
+      VALUES (@id, @course_id, @component, @weight, @score, @max_score)
+      ON CONFLICT(id) DO UPDATE SET
+        component = excluded.component,
+        weight    = excluded.weight,
+        score     = excluded.score,
+        max_score = excluded.max_score
+    `).run({ score: null, max_score: 100, ...input, id })
+    return { ok: true, id }
+  })
+
+  ipcMain.handle('grades:deleteInput', (_e, id: string) => {
+    db.prepare('DELETE FROM grade_inputs WHERE id = ?').run(id)
+    return { ok: true }
+  })
+
+  // ═══════════════════════════════════════════════════
+  // STUDY SCHEDULE GENERATOR
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('schedule:generate', async (_e, payload: any) => {
+    const store = new (require('electron-store'))()
+    const provider: string = store.get('ai_provider', 'groq') as string
+    const apiKey: string   = store.get(`api_key_${provider}`, '') as string
+
+    if (!apiKey && provider !== 'ollama') {
+      return { error: 'أدخل مفتاح API في الإعدادات أولاً', schedule: null }
+    }
+
+    const prompt = `
+أنت مساعد أكاديمي. أنشئ جدول مذاكرة مُثلى بناءً على المعلومات التالية:
+الامتحانات: ${JSON.stringify(payload.exams)}
+المواد: ${JSON.stringify(payload.courses)}
+ساعات الدراسة اليومية المتاحة: ${payload.hoursPerDay}
+تاريخ البدء: ${payload.startDate}
+
+أنشئ جدول مذاكرة يومي بمبدأ التكرار المتباعد (Spaced Repetition).
+أجب بـ JSON فقط بهذا الشكل:
+{
+  "title": "جدول مذاكرة [اسم الفصل]",
+  "days": [
+    {
+      "date": "YYYY-MM-DD",
+      "sessions": [
+        { "course": "اسم المادة", "topic": "الموضوع", "duration": 60, "type": "مراجعة|دراسة جديدة|تدريب" }
+      ]
+    }
+  ]
+}
+`
+
+    try {
+      // Use Groq as primary (fastest free option)
+      const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model:    'llama-3.1-70b-versatile',
+          messages: [{ role: 'user', content: prompt }],
+          max_tokens: 2000,
+          response_format: { type: 'json_object' },
+        }),
+      })
+
+      const json    = await res.json() as any
+      const content = json.choices?.[0]?.message?.content ?? '{}'
+      const parsed  = JSON.parse(content)
+
+      const { v4: uuidv4 } = require('uuid')
+      const id = uuidv4()
+      db.prepare(`
+        INSERT INTO study_schedule (id, title, generated_for, schedule_data)
+        VALUES (?, ?, ?, ?)
+      `).run(id, parsed.title ?? 'جدول مذاكرة', payload.startDate, JSON.stringify(parsed.days ?? []))
+
+      return { schedule: { id, ...parsed }, error: null }
+    } catch (e: any) {
+      return { schedule: null, error: 'فشل توليد الجدول — تحقق من مفتاح API' }
+    }
+  })
+
+  ipcMain.handle('schedule:getAll', () =>
+    db.prepare('SELECT * FROM study_schedule ORDER BY created_at DESC').all()
+  )
+
+  ipcMain.handle('schedule:delete', (_e, id: string) => {
+    db.prepare('DELETE FROM study_schedule WHERE id = ?').run(id)
+    return { ok: true }
+  })
 }

@@ -19,7 +19,12 @@ import {
   ChevronLeft,
   GraduationCap,
   ShieldAlert,
-  Timer
+  Timer,
+  ClipboardCheck,
+  Flame,
+  Search,
+  Sigma,
+  Sparkles
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -35,7 +40,10 @@ export function Sidebar() {
     { id: 'calendar', label: 'التقويم الجامعي', icon: Calendar },
     { id: 'assignments', label: 'الواجبات والخزنة', icon: FileSpreadsheet },
     { id: 'goals', label: 'الأهداف والمعدل', icon: Target },
-    { id: 'focus', label: 'جلسة التركيز والـ XP', icon: Timer }
+    { id: 'focus', label: 'جلسة التركيز والـ XP', icon: Timer },
+    { id: 'attendance', label: 'تتبع الحضور والغياب', icon: ClipboardCheck },
+    { id: 'habits', label: 'متتبع العادات اليومية', icon: Flame },
+    { id: 'schedule', label: 'جدول المذاكرة الذكي', icon: Sparkles }
   ]
 
   const toolItems = [
@@ -43,7 +51,9 @@ export function Sidebar() {
     { id: 'converter', label: 'محول الملفات', icon: FileType },
     { id: 'youtube', label: 'مشغل يوتيوب', icon: Youtube },
     { id: 'wiki', label: 'المفكرة والملاحظات', icon: FileText },
-    { id: 'notebook', label: 'مساعد NotebookLM', icon: BookOpen }
+    { id: 'notebook', label: 'مساعد NotebookLM', icon: BookOpen },
+    { id: 'research', label: 'البحث الأكاديمي والمراجع', icon: Search },
+    { id: 'formulas', label: 'ورقة المعادلات العلمية', icon: Sigma }
   ]
 
   const bottomItems = [

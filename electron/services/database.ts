@@ -108,6 +108,99 @@ export function initDatabase() {
       department TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     );
+
+    -- Feature 1: Attendance Tracker
+    CREATE TABLE IF NOT EXISTS attendance (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'present',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Feature 2: Habit Tracker
+    CREATE TABLE IF NOT EXISTS habits (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      icon TEXT DEFAULT '📚',
+      color TEXT DEFAULT '#6d28d9',
+      target_days INTEGER DEFAULT 7,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS habit_logs (
+      id TEXT PRIMARY KEY,
+      habit_id TEXT NOT NULL,
+      date TEXT NOT NULL,
+      completed INTEGER DEFAULT 0,
+      note TEXT DEFAULT '',
+      UNIQUE(habit_id, date)
+    );
+
+    -- Feature 3: Research Paper Finder (cache)
+    CREATE TABLE IF NOT EXISTS research_cache (
+      id TEXT PRIMARY KEY,
+      query TEXT NOT NULL,
+      source TEXT NOT NULL,
+      results TEXT NOT NULL,
+      fetched_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Feature 4: Formula Sheet
+    CREATE TABLE IF NOT EXISTS formula_sheets (
+      id TEXT PRIMARY KEY,
+      course_id TEXT,
+      title TEXT NOT NULL,
+      formulas TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Feature 5: Focus Sessions
+    CREATE TABLE IF NOT EXISTS focus_sessions (
+      id TEXT PRIMARY KEY,
+      duration_minutes INTEGER NOT NULL,
+      break_minutes INTEGER DEFAULT 5,
+      completed INTEGER DEFAULT 0,
+      started_at TEXT,
+      ended_at TEXT,
+      notes TEXT DEFAULT ''
+    );
+
+    -- Feature 6: Grade Predictor inputs
+    CREATE TABLE IF NOT EXISTS grade_inputs (
+      id TEXT PRIMARY KEY,
+      course_id TEXT NOT NULL,
+      component TEXT NOT NULL,
+      weight REAL NOT NULL,
+      score REAL,
+      max_score REAL DEFAULT 100,
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Feature 7: Book References (Open Library cache)
+    CREATE TABLE IF NOT EXISTS book_references (
+      id TEXT PRIMARY KEY,
+      isbn TEXT,
+      title TEXT NOT NULL,
+      author TEXT,
+      year TEXT,
+      cover_url TEXT,
+      ol_key TEXT,
+      course_id TEXT,
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
+    -- Feature 8: Study Schedule (AI-generated)
+    CREATE TABLE IF NOT EXISTS study_schedule (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      generated_for TEXT,
+      schedule_data TEXT DEFAULT '[]',
+      created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
   `)
 
   // Flashcards FSRS Migrations
