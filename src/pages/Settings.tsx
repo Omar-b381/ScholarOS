@@ -383,6 +383,14 @@ export function Settings() {
   // SyncGuard Actions
   const handleSaveSyncSettings = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (!syncSettings.encryptionKey || !syncSettings.encryptionKey.trim()) {
+      alert('خطأ: لا يمكن ترك مفتاح تشفير البيانات فارغاً!')
+      return
+    }
+    if (syncSettings.encryptionKey.trim().length < 6) {
+      alert('تنبيه أمان: يجب أن يتكون مفتاح التشفير من 6 خانات أو أكثر لضمان الخصوصية القصوى وحماية الدرجات!')
+      return
+    }
     try {
       await window.electronAPI.syncGuard.setSettings(syncSettings)
       alert('تم حفظ إعدادات تزامن SyncGuard بنجاح!')

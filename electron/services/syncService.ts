@@ -21,25 +21,41 @@ let syncTimeout: NodeJS.Timeout | null = null
 
 // Encrypt payload with student's device key (AES-256-CBC)
 export function encryptPayload(data: any, key: string): string {
-  const iv = crypto.randomBytes(16)
-  const hashedKey = crypto.createHash('sha256').update(key).digest()
-  const cipher = crypto.createCipheriv('aes-256-cbc', hashedKey, iv)
-  let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex')
-  encrypted += cipher.final('hex')
-  return iv.toString('hex') + ':' + encrypted
+  try {
+    if (!key || typeof key !== 'string' || !key.trim()) {
+      throw new Error('مفتاح التشفير فارغ أو غير صالح. يرجى تعيين مفتاح تشفير صالح في الإعدادات.')
+    }
+    const iv = crypto.randomBytes(16)
+    const hashedKey = crypto.createHash('sha256').update(key).digest()
+    const cipher = crypto.createCipheriv('aes-256-cbc', hashedKey, iv)
+    let encrypted = cipher.update(JSON.stringify(data), 'utf8', 'hex')
+    encrypted += cipher.final('hex')
+    return iv.toString('hex') + ':' + encrypted
+  } catch (err: any) {
+    throw new Error('فشل تشفير البيانات الأكاديمية: ' + err.message)
+  }
 }
 
 // Decrypt payload with student's device key
 export function decryptPayload(cipherText: string, key: string): any {
-  const parts = cipherText.split(':')
-  if (parts.length < 2) throw new Error('Invalid ciphertext format')
-  const iv = Buffer.from(parts.shift()!, 'hex')
-  const encrypted = parts.join(':')
-  const hashedKey = crypto.createHash('sha256').update(key).digest()
-  const decipher = crypto.createDecipheriv('aes-256-cbc', hashedKey, iv)
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8')
-  decrypted += decipher.final('utf8')
-  return JSON.parse(decrypted)
+  try {
+    if (!key || typeof key !== 'string' || !key.trim()) {
+      throw new Error('مفتاح فك التشفير فارغ أو غير صالح. يرجى تعيين مفتاح تشفير صالح في الإعدادات.')
+    }
+    const parts = cipherText.split(':')
+    if (parts.length < 2) {
+      throw new Error('صيغة النص المشفر المستلم من السحاب غير صالحة.')
+    }
+    const iv = Buffer.from(parts.shift()!, 'hex')
+    const encrypted = parts.join(':')
+    const hashedKey = crypto.createHash('sha256').update(key).digest()
+    const decipher = crypto.createDecipheriv('aes-256-cbc', hashedKey, iv)
+    let decrypted = decipher.update(encrypted, 'hex', 'utf8')
+    decrypted += decipher.final('utf8')
+    return JSON.parse(decrypted)
+  } catch (err: any) {
+    throw new Error('فشل فك تشفير البيانات الأكاديمية. يرجى التحقق من تطابق مفتاح التشفير (Cipher Key) بين أجهزتك. التفاصيل: ' + err.message)
+  }
 }
 
 // Fetch Sync settings
