@@ -178,5 +178,12 @@ interface Window {
       simulateAction: (args: { action: string; data?: any }) => Promise<any>;
       testConnection: (args: { url: string; anonKey: string }) => Promise<{ success: boolean; error?: string }>;
     };
+
+    // Academic Levels & Transitions
+    levels_getAll: () => Promise<any[]>;
+    levels_getActive: () => Promise<any>;
+    levels_save: (level: any) => Promise<void>;
+    levels_delete: (id: string) => Promise<void>;
+    levels_transition: (name: string) => Promise<{ success: boolean; newLevelId: string }>;
   };
 }

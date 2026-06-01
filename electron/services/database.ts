@@ -327,6 +327,17 @@ export function initDatabase() {
         duration_ms INTEGER DEFAULT 0,
         error TEXT
       );
+
+      CREATE TABLE IF NOT EXISTS academic_levels (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        status TEXT DEFAULT 'active',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        checksum TEXT,
+        is_deleted INTEGER DEFAULT 0
+      );
     `);
 
     // Dynamically add sync columns to existing tables
@@ -345,6 +356,30 @@ export function initDatabase() {
       }
       if (!cols.some(c => c.name === 'is_deleted')) {
         try { db.exec(`ALTER TABLE ${tableName} ADD COLUMN is_deleted INTEGER DEFAULT 0`) } catch (e) {}
+      }
+    }
+
+    // Alter courses table to add academic_level_id sync column if missing
+    const courseCols = db.prepare("PRAGMA table_info(courses)").all() as any[]
+    if (!courseCols.some(c => c.name === 'academic_level_id')) {
+      try { db.exec(`ALTER TABLE courses ADD COLUMN academic_level_id TEXT`) } catch (e) {}
+    }
+
+    // Seeding default academic level if empty for backward-compatibility
+    const levelsCount = (db.prepare("SELECT COUNT(*) as count FROM academic_levels WHERE is_deleted = 0").get() as any).count;
+    if (levelsCount === 0) {
+      try {
+        const defaultLevelId = 'level-default';
+        const now = new Date().toISOString();
+        db.prepare(`
+          INSERT OR IGNORE INTO academic_levels (id, name, status, created_at, updated_at)
+          VALUES (?, 'الفرقة الأولى', 'active', ?, ?)
+        `).run(defaultLevelId, now, now);
+
+        // Update all existing courses to have this level
+        db.prepare("UPDATE courses SET academic_level_id = ? WHERE academic_level_id IS NULL").run(defaultLevelId);
+      } catch (e) {
+        console.error('Failed to seed default academic level:', e);
       }
     }
   } catch (err) {
@@ -414,14 +449,20 @@ export function enqueueChange(tableName: string, recordId: string, payload: any,
 
 // Courses
 export function getAllCourses() {
-  return db.prepare('SELECT * FROM courses WHERE is_deleted = 0 ORDER BY name ASC').all()
+  const activeLvl = db.prepare("SELECT id FROM academic_levels WHERE status = 'active' AND is_deleted = 0").get() as any;
+  const activeLvlId = activeLvl ? activeLvl.id : 'level-default';
+  return db.prepare('SELECT * FROM courses WHERE is_deleted = 0 AND (academic_level_id = ? OR academic_level_id IS NULL) ORDER BY name ASC').all(activeLvlId);
 }
 
 export function saveCourse(course: any) {
-  const { id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes } = course
+  const { id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes, academic_level_id } = course
+  const activeLvl = db.prepare("SELECT id FROM academic_levels WHERE status = 'active' AND is_deleted = 0").get() as any;
+  const activeLvlId = activeLvl ? activeLvl.id : 'level-default';
+  const levelId = academic_level_id || activeLvlId;
+
   const stmt = db.prepare(`
-    INSERT INTO courses (id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes, is_deleted)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+    INSERT INTO courses (id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes, academic_level_id, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       code = excluded.code,
@@ -431,10 +472,11 @@ export function saveCourse(course: any) {
       schedule = excluded.schedule,
       syllabus = excluded.syllabus,
       notes = excluded.notes,
+      academic_level_id = excluded.academic_level_id,
       is_deleted = 0
   `)
-  stmt.run(id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes)
-  enqueueChange('courses', id, course)
+  stmt.run(id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes, levelId)
+  enqueueChange('courses', id, { ...course, academic_level_id: levelId })
 }
 
 export function deleteCourse(id: string) {
@@ -798,16 +840,77 @@ export function getDatabaseStats() {
   const tables = [
     'courses', 'events', 'assignments', 'goals', 'grades',
     'wiki_pages', 'flashcards', 'resources', 'mind_maps',
-    'chat_sessions', 'calculator_history', 'notifications_log', 'lecturers'
+    'chat_sessions', 'calculator_history', 'notifications_log', 'lecturers', 'academic_levels'
   ]
   const stats: Record<string, number> = {}
   for (const table of tables) {
     try {
       const row = db.prepare(`SELECT COUNT(*) as count FROM ${table}`).get() as { count: number }
       stats[table] = row ? row.count : 0
-    } catch {
+    } catch (e) {
       stats[table] = 0
     }
   }
-  return stats
+  return stats;
+}
+
+// ═══════════════════════════════════════════════════
+// ACADEMIC LEVELS & TRANSITIONS
+// ═══════════════════════════════════════════════════
+
+export function getAllLevels() {
+  return db.prepare('SELECT * FROM academic_levels WHERE is_deleted = 0 ORDER BY created_at ASC').all();
+}
+
+export function getActiveLevel() {
+  return db.prepare("SELECT * FROM academic_levels WHERE status = 'active' AND is_deleted = 0").get();
+}
+
+export function saveLevel(level: any) {
+  const { id, name, status } = level;
+  const now = new Date().toISOString();
+  db.prepare(`
+    INSERT INTO academic_levels (id, name, status, created_at, updated_at, is_deleted)
+    VALUES (?, ?, ?, ?, ?, 0)
+    ON CONFLICT(id) DO UPDATE SET
+      name = excluded.name,
+      status = excluded.status,
+      updated_at = excluded.updated_at
+  `).run(id, name, status || 'active', now, now);
+  
+  enqueueChange('academic_levels', id, level);
+}
+
+export function deleteLevel(id: string) {
+  db.prepare('UPDATE academic_levels SET is_deleted = 1 WHERE id = ?').run(id);
+  enqueueChange('academic_levels', id, { id }, 1);
+}
+
+export function archiveAndTransition(newLevelName: string) {
+  const transaction = db.transaction(() => {
+    // 1. Archive the current active level
+    db.prepare("UPDATE academic_levels SET status = 'archived', updated_at = ? WHERE status = 'active'").run(new Date().toISOString());
+    
+    // Get all archived levels to enqueue their status updates
+    const archivedLevels = db.prepare("SELECT id FROM academic_levels WHERE status = 'archived' AND is_deleted = 0").all() as any[];
+    for (const lvl of archivedLevels) {
+      enqueueChange('academic_levels', lvl.id, { id: lvl.id, status: 'archived' });
+    }
+
+    // 2. Create the new active academic year level
+    const crypto = require('crypto');
+    const newId = 'level-' + crypto.randomBytes(4).toString('hex');
+    const now = new Date().toISOString();
+    
+    db.prepare(`
+      INSERT INTO academic_levels (id, name, status, created_at, updated_at, is_deleted)
+      VALUES (?, ?, 'active', ?, ?, 0)
+    `).run(newId, newLevelName, now, now);
+    
+    enqueueChange('academic_levels', newId, { id: newId, name: newLevelName, status: 'active' });
+    
+    return { success: true, newLevelId: newId };
+  });
+  
+  return transaction();
 }

@@ -10,6 +10,7 @@ import {
   Settings as SettingsIcon,
   User,
   Bot,
+  Award,
   Bell,
   Database,
   Info,
@@ -96,6 +97,50 @@ export function Settings() {
   const [isTesting, setIsTesting] = React.useState(false)
   const [testStatus, setTestStatus] = React.useState<{ success: boolean; message: string } | null>(null)
 
+  // Academic levels states
+  const [levels, setLevels] = React.useState<any[]>([])
+  const [activeLevel, setActiveLevel] = React.useState<any>(null)
+  const [newLevelName, setNewLevelName] = React.useState('')
+  const [isTransitioning, setIsTransitioning] = React.useState(false)
+
+  const loadLevelsData = React.useCallback(async () => {
+    try {
+      if (window.electronAPI && window.electronAPI.levels_getAll) {
+        const all = await window.electronAPI.levels_getAll()
+        setLevels(all)
+        const active = await window.electronAPI.levels_getActive()
+        setActiveLevel(active)
+      }
+    } catch (err) {
+      console.error('[Academic Levels UI] Failed to load levels:', err)
+    }
+  }, [])
+
+  const handleTransition = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!newLevelName.trim()) {
+      alert('يرجى إدخال اسم السنة الدراسية الجديدة!')
+      return
+    }
+
+    if (confirm(`تنبيه: هل أنت متأكد من الانتقال إلى المستوى الدراسي الجديد "${newLevelName}"؟\nسيتم أرشفة سنتك الحالية وقفل مقرراتها وتأسيس لوحة تحكم ومحاضرات جديدة ونظيفة بالكامل!`)) {
+      setIsTransitioning(true)
+      try {
+        const res = await window.electronAPI.levels_transition(newLevelName.trim())
+        if (res.success) {
+          alert('تهانينا الأكاديمية! تم الانتقال للمستوى الدراسي الجديد بنجاح وأرشفة سنتك السابقة.')
+          setNewLevelName('')
+          await loadLevelsData()
+          await loadSyncData()
+          await loadAllData() // refresh courses & other pages
+        }
+      } catch (err: any) {
+        alert(`فشل الانتقال للسنة التالية: ${err.message}`)
+      } finally {
+        setIsTransitioning(false)
+      }
+    }
+  }
 
   const loadSyncData = React.useCallback(async () => {
     try {
@@ -114,6 +159,7 @@ export function Settings() {
 
   React.useEffect(() => {
     loadSyncData()
+    loadLevelsData()
 
     if (window.electronAPI && window.electronAPI.on) {
       const unsubUpdated = window.electronAPI.on('sync:updated', () => {
@@ -1111,6 +1157,123 @@ create policy "Allow public access" on sync_records for all using (true) with ch
       </Card>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Academic Levels & Archiving Management Card */}
+        <Card className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Award className="h-5 w-5 text-primary" />
+              <span>السنوات والمستويات الدراسية والأرشيف</span>
+            </CardTitle>
+            <CardDescription>
+              إدارة مستوياتك الدراسية الحالية، وأرشفة الفصول السابقة لحماية الدرجات والتقدم التاريخي
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <div className="bg-primary/5 border border-primary/10 rounded-xl p-4 flex gap-3 text-xs leading-relaxed text-foreground">
+              <Info className="h-5 w-5 text-primary shrink-0" />
+              <div>
+                <p className="font-bold mb-1">حول نظام السنوات الأكاديمية والأرشفة:</p>
+                <p className="text-muted-foreground text-[11px]">
+                  عند الانتقال لمستوى دراسي جديد (على سبيل المثال: من الفرقة الأولى إلى الفرقة الثانية)، سيتم أرشفة سنتك الحالية وقفل مقرراتها لتصبح للقراءة فقط، مع الحفاظ الكامل على كافة الإحصائيات والدرجات والمعدل التراكمي العام (Cumulative GPA). ستحصل على لوحة تحكم وجدول محاضرات ومهام نظيفة وجديدة للبدء بنشاط!
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Levels History */}
+              <div className="space-y-3">
+                <h4 className="text-xs font-black text-foreground flex items-center gap-1.5">
+                  <History className="h-4.5 w-4.5 text-primary" />
+                  <span>المستويات الأكاديمية المسجلة</span>
+                </h4>
+                
+                <div className="space-y-2 max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
+                  {levels.map((lvl) => (
+                    <div
+                      key={lvl.id}
+                      className={`flex items-center justify-between p-3 border rounded-lg ${
+                        lvl.status === 'active'
+                          ? 'bg-emerald-500/5 border-emerald-500/20'
+                          : 'bg-muted/30 border-border'
+                      }`}
+                    >
+                      <div className="flex flex-col gap-0.5 animate-fadeIn">
+                        <span className="text-xs font-bold text-foreground">{lvl.name}</span>
+                        <span className="text-[10px] text-muted-foreground">
+                          تاريخ الإنشاء: {new Date(lvl.created_at).toLocaleDateString('ar-EG')}
+                        </span>
+                      </div>
+                      
+                      <div className="flex items-center gap-2">
+                        {lvl.status === 'active' ? (
+                          <Badge variant="success" className="text-[9px] font-bold py-0.5 px-2">
+                            نشط حالياً
+                          </Badge>
+                        ) : (
+                          <Badge variant="secondary" className="text-[9px] font-bold py-0.5 px-2 bg-muted-foreground/10 text-muted-foreground">
+                            مؤرشفة ومغلقة
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  {levels.length === 0 && (
+                    <div className="py-8 text-center text-xs text-muted-foreground border border-dashed rounded-lg">
+                      لا توجد مستويات دراسية مسجلة.
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Transition Wizard Form */}
+              <div className="space-y-4 border-t pt-6 md:border-t-0 md:border-r md:pr-6 border-border flex flex-col justify-between">
+                <div>
+                  <h4 className="text-xs font-black text-foreground flex items-center gap-1.5 mb-3">
+                    <Award className="h-4.5 w-4.5 text-primary" />
+                    <span>معالج الانتقال والترقية للمستوى التالي</span>
+                  </h4>
+                  
+                  <form onSubmit={handleTransition} className="space-y-3">
+                    <div className="space-y-1.5">
+                      <label htmlFor="new_level_name" className="text-[11px] font-bold text-muted-foreground">
+                        اسم المستوى الأكاديمي الجديد
+                      </label>
+                      <Input
+                        id="new_level_name"
+                        placeholder="مثال: الفرقة الثانية، المستوى الثاني..."
+                        value={newLevelName}
+                        onChange={(e) => setNewLevelName(e.target.value)}
+                        disabled={isTransitioning}
+                        className="text-xs"
+                      />
+                    </div>
+
+                    <Button
+                      type="submit"
+                      disabled={isTransitioning || !newLevelName.trim()}
+                      className="w-full text-xs font-bold gap-2 mt-2"
+                    >
+                      {isTransitioning ? (
+                        <>
+                          <RefreshCw className="h-4 w-4 animate-spin" /> جاري الترقية والأرشفة...
+                        </>
+                      ) : (
+                        <>
+                          <Award className="h-4 w-4" /> الانتقال إلى المستوى الأكاديمي الجديد
+                        </>
+                      )}
+                    </Button>
+                  </form>
+                </div>
+                
+                <p className="text-[10px] text-muted-foreground text-center leading-relaxed mt-4">
+                  * يرجى إتمام رصد درجات الفصل الحالي قبل الأرشفة لضمان حساب المعدل التراكمي بدقة.
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
         {/* Notifications Preference and Theme controls */}
 
         <Card className="flex flex-col justify-between">

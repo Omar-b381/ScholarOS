@@ -198,6 +198,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     testConnection: (args: { url: string; anonKey: string }) => ipcRenderer.invoke('sync:testConnection', args)
   },
 
+  // ── Academic Levels & Transitions ───────────────────
+  levels_getAll: () => ipcRenderer.invoke('db:levels:getAll'),
+  levels_getActive: () => ipcRenderer.invoke('db:levels:getActive'),
+  levels_save: (level: any) => ipcRenderer.invoke('db:levels:save', level),
+  levels_delete: (id: string) => ipcRenderer.invoke('db:levels:delete', id),
+  levels_transition: (name: string) => ipcRenderer.invoke('db:levels:transition', name),
+
   // Subscribing to main process events
   on: (channel: string, callback: (...args: any[]) => void) => {
     // Exclude channels not prefixed with app logic if needed, but allow simple registration

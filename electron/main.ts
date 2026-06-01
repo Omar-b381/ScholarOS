@@ -51,6 +51,11 @@ import {
   deleteLecturer,
   getDatabaseStats,
   enqueueChange,
+  getAllLevels,
+  getActiveLevel,
+  saveLevel,
+  deleteLevel,
+  archiveAndTransition,
   db
 } from './services/database'
 
@@ -915,6 +920,13 @@ function registerIpcHandlers() {
     db.prepare('DELETE FROM study_schedule WHERE id = ?').run(id)
     return { ok: true }
   })
+
+  // ── Academic Levels & Transitions ───────────────────
+  ipcMain.handle('db:levels:getAll', () => getAllLevels())
+  ipcMain.handle('db:levels:getActive', () => getActiveLevel())
+  ipcMain.handle('db:levels:save', (_, level) => saveLevel(level))
+  ipcMain.handle('db:levels:delete', (_, id) => deleteLevel(id))
+  ipcMain.handle('db:levels:transition', (_, name) => archiveAndTransition(name))
 
   // ═══════════════════════════════════════════════════
   // SYNCGUARD HANDLERS
