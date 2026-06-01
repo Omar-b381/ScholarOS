@@ -187,10 +187,21 @@ contextBridge.exposeInMainWorld('electronAPI', {
   schedule_getAll:          () => ipcRenderer.invoke('schedule:getAll'),
   schedule_delete:          (id: string) => ipcRenderer.invoke('schedule:delete', id),
 
+  // ── SyncGuard Integration ────────────────────────────
+  syncGuard: {
+    getStatus: () => ipcRenderer.invoke('sync:getStatus'),
+    getLogs: () => ipcRenderer.invoke('sync:getLogs'),
+    getGradeConflicts: () => ipcRenderer.invoke('sync:getGradeConflicts'),
+    triggerSync: () => ipcRenderer.invoke('sync:trigger'),
+    setSettings: (settings: any) => ipcRenderer.invoke('sync:setSettings', settings),
+    simulateAction: (args: { action: string; data?: any }) => ipcRenderer.invoke('sync:simulateAction', args),
+    testConnection: (args: { url: string; anonKey: string }) => ipcRenderer.invoke('sync:testConnection', args)
+  },
+
   // Subscribing to main process events
   on: (channel: string, callback: (...args: any[]) => void) => {
     // Exclude channels not prefixed with app logic if needed, but allow simple registration
-    const validChannels = ['notification:received', 'google:auto-synced']
+    const validChannels = ['notification:received', 'google:auto-synced', 'sync:toast', 'sync:updated']
     if (validChannels.includes(channel)) {
       const subscription = (_event: any, ...args: any[]) => callback(...args)
       ipcRenderer.on(channel, subscription)
@@ -198,4 +209,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
     }
     return undefined
   }
+
 })

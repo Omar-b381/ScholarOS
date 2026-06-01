@@ -32,6 +32,36 @@ export function Sidebar() {
   const [collapsed, setCollapsed] = React.useState(false)
   const [toolsOpen, setToolsOpen] = React.useState(false)
 
+  // SyncGuard Status State
+  const [syncStatus, setSyncStatus] = React.useState({
+    paused: false,
+    offlineSimulated: false,
+    pendingCount: 0
+  })
+
+  const loadSyncStatus = React.useCallback(async () => {
+    try {
+      if (window.electronAPI && window.electronAPI.syncGuard) {
+        const status = await window.electronAPI.syncGuard.getStatus()
+        setSyncStatus(status)
+      }
+    } catch (e) {}
+  }, [])
+
+  React.useEffect(() => {
+    loadSyncStatus()
+    if (window.electronAPI && window.electronAPI.on) {
+      const unsubUpdated = window.electronAPI.on('sync:updated', () => loadSyncStatus())
+      const unsubToast = window.electronAPI.on('sync:toast', () => loadSyncStatus())
+      return () => {
+        if (unsubUpdated) unsubUpdated()
+        if (unsubToast) unsubToast()
+      }
+    }
+    return undefined
+  }, [loadSyncStatus])
+
+
   const toggleSidebar = () => setCollapsed(!collapsed)
 
   const menuItems = [
@@ -191,6 +221,45 @@ export function Sidebar() {
           )
         })}
 
+        {/* SyncGuard Real-Time Status Badge */}
+        <div 
+          onClick={() => setActivePage('settings')}
+          className={cn(
+            "flex items-center gap-2.5 p-2 rounded-lg cursor-pointer hover:bg-accent border border-dashed transition-all duration-200 mt-2 select-none",
+            collapsed ? "justify-center border-transparent bg-transparent" : "border-border/40 bg-muted/10 mx-1"
+          )}
+          title={
+            syncStatus.paused ? "التزامن موقوف مؤقتاً" :
+            syncStatus.offlineSimulated ? "وضع الأوفلاين (المحاكاة نشطة)" :
+            syncStatus.pendingCount > 0 ? `${syncStatus.pendingCount} تعديلات معلقة في الانتظار` :
+            "متصل وجاهز - آمن وسحابي"
+          }
+        >
+          {syncStatus.paused ? (
+            <div className="h-2.5 w-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.6)]" />
+          ) : syncStatus.offlineSimulated ? (
+            <div className="h-2.5 w-2.5 rounded-full bg-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.6)] animate-pulse" />
+          ) : (
+            <div className="h-2.5 w-2.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]" />
+          )}
+
+          {!collapsed && (
+            <div className="flex flex-col text-right">
+              <span className="text-[10px] font-black text-foreground">
+                {syncStatus.paused ? "تزامن موقوف" :
+                 syncStatus.offlineSimulated ? "وضع الأوفلاين" :
+                 syncStatus.pendingCount > 0 ? `${syncStatus.pendingCount} معلق` :
+                 "SyncGuard نشط"}
+              </span>
+              <span className="text-[9px] text-muted-foreground scale-95 origin-right">
+                {syncStatus.paused ? "اضغط للتفعيل" :
+                 syncStatus.offlineSimulated ? "في انتظار الاتصال" :
+                 "البيانات آمنة"}
+              </span>
+            </div>
+          )}
+        </div>
+
         {/* Collapse Button */}
         <button
           onClick={toggleSidebar}
@@ -198,6 +267,7 @@ export function Sidebar() {
         >
           {collapsed ? <ChevronLeft className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
         </button>
+
       </div>
     </aside>
   )

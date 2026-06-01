@@ -50,6 +50,7 @@ import {
   saveLecturer,
   deleteLecturer,
   getDatabaseStats,
+  enqueueChange,
   db
 } from './services/database'
 
@@ -80,6 +81,20 @@ import {
   getGoogleStatus,
   syncEventsToGoogleCalendar
 } from './services/googleCalendarService'
+
+import {
+  startSyncTimer,
+  stopSyncTimer,
+  getSyncSettings,
+  setSyncSettings,
+  runSyncCycle,
+  testSupabaseConnection,
+  encryptPayload,
+  notifyUI
+} from './services/syncService'
+
+import { dbRowToCard, cardToDbFields } from './services/fsrsHelper'
+import { FSRS, generatorParameters } from 'ts-fsrs'
 
 const store = new Store()
 let mainWindow: BrowserWindow | null = null
@@ -150,6 +165,9 @@ app.whenReady().then(() => {
   initDatabase()
   initNotificationService(mainWindow?.webContents)
 
+  // Start SyncGuard background scheduler
+  startSyncTimer()
+
   // Register all IPC main handlers
   registerIpcHandlers()
 
@@ -162,6 +180,9 @@ app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   stopNotificationService()
+  try {
+    stopSyncTimer()
+  } catch (e) {}
   if (process.platform !== 'darwin') {
     app.quit()
   }
@@ -416,8 +437,6 @@ function registerIpcHandlers() {
     const row = db.prepare('SELECT * FROM flashcards WHERE id = ?').get(id) as any
     if (!row) throw new Error('Flashcard not found')
 
-    const { FSRS, generatorParameters } = require('ts-fsrs')
-    const { dbRowToCard, cardToDbFields } = require('./services/fsrsHelper')
     const fsrsInstance = new FSRS(generatorParameters({ enable_fuzz: true }))
     const card = dbRowToCard(row)
     const result = fsrsInstance.next(card, new Date(), rating)
@@ -493,21 +512,23 @@ function registerIpcHandlers() {
   // ═══════════════════════════════════════════════════
   ipcMain.handle('attendance:getAll', (_e, courseId?: string) => {
     if (courseId) {
-      return db.prepare('SELECT * FROM attendance WHERE course_id = ? ORDER BY date DESC').all(courseId)
+      return db.prepare('SELECT * FROM attendance WHERE course_id = ? AND is_deleted = 0 ORDER BY date DESC').all(courseId)
     }
-    return db.prepare('SELECT * FROM attendance ORDER BY date DESC').all()
+    return db.prepare('SELECT * FROM attendance WHERE is_deleted = 0 ORDER BY date DESC').all()
   })
 
   ipcMain.handle('attendance:save', (_e, record: any) => {
     const { v4: uuidv4 } = require('uuid')
     const id = record.id || uuidv4()
     db.prepare(`
-      INSERT INTO attendance (id, course_id, date, status, notes)
-      VALUES (@id, @course_id, @date, @status, @notes)
+      INSERT INTO attendance (id, course_id, date, status, notes, is_deleted)
+      VALUES (@id, @course_id, @date, @status, @notes, 0)
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
-        notes  = excluded.notes
+        notes  = excluded.notes,
+        is_deleted = 0
     `).run({ notes: '', ...record, id })
+    enqueueChange('attendance', id, record)
     return db.prepare('SELECT * FROM attendance WHERE id = ?').get(id)
   })
 
@@ -893,5 +914,175 @@ function registerIpcHandlers() {
   ipcMain.handle('schedule:delete', (_e, id: string) => {
     db.prepare('DELETE FROM study_schedule WHERE id = ?').run(id)
     return { ok: true }
+  })
+
+  // ═══════════════════════════════════════════════════
+  // SYNCGUARD HANDLERS
+  // ═══════════════════════════════════════════════════
+  ipcMain.handle('sync:getStatus', () => {
+    const settings = getSyncSettings()
+    
+    // Get size of pending queue
+    const queueSize = db.prepare("SELECT COUNT(*) as count FROM sync_queue WHERE status = 'pending'").get() as { count: number }
+    return {
+      ...settings,
+      pendingCount: queueSize ? queueSize.count : 0
+    }
+  })
+
+  ipcMain.handle('sync:getLogs', () => {
+    return db.prepare("SELECT * FROM sync_logs ORDER BY timestamp DESC LIMIT 20").all()
+  })
+
+  ipcMain.handle('sync:getGradeConflicts', () => {
+    return db.prepare("SELECT * FROM grade_conflict_log ORDER BY resolved_at DESC").all()
+  })
+
+  ipcMain.handle('sync:trigger', async () => {
+    return await runSyncCycle()
+  })
+
+  ipcMain.handle('sync:setSettings', (_, settings) => {
+    setSyncSettings(settings)
+    return { success: true }
+  })
+
+  ipcMain.handle('sync:simulateAction', async (_, { action, data }) => {
+    const Store = require('electron-store')
+    const store = new Store()
+    const crypto = require('crypto')
+    const fs = require('fs')
+    const path = require('path')
+
+    const settings = getSyncSettings()
+    const userData = app.getPath('userData')
+    const relayPath = path.join(userData, 'sync_relay_mock.json')
+
+    // Read existing relay
+    let relay: any[] = []
+    if (fs.existsSync(relayPath)) {
+      try { relay = JSON.parse(fs.readFileSync(relayPath, 'utf8')) } catch (e) {}
+    }
+
+    if (action === 'toggle_offline') {
+      const current = store.get('settings.sync.offlineSimulated', false)
+      store.set('settings.sync.offlineSimulated', !current)
+      notifyUI(!current ? 'sync:offline' : 'sync:success', !current ? 'Simulated Offline Mode Enabled' : 'Back Online')
+      return { offline: !current }
+    }
+
+    if (action === 'mobile_edit') {
+      // Simulate student adding/editing an assignment on their phone
+      const phoneAssignmentId = data?.id || crypto.randomUUID()
+      const payload = {
+        id: phoneAssignmentId,
+        title: data?.title || 'مراجعة مشروع التخرج للهاتف',
+        course_id: data?.course_id || 'course-sample',
+        due_date: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+        status: 'pending',
+        grade: '',
+        notes: 'مضافة من الهاتف للمحاكاة',
+        is_deleted: 0,
+        updated_at: new Date().toISOString()
+      }
+
+      const cipher = encryptPayload(payload, settings.encryptionKey)
+      const checksum = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+
+      const record = {
+        id: phoneAssignmentId,
+        table_name: 'assignments',
+        payload: cipher,
+        updated_at: payload.updated_at,
+        device_id: 'student-phone',
+        schema_version: 1,
+        checksum: checksum
+      }
+
+      const existingIdx = relay.findIndex(r => r.id === record.id && r.table_name === 'assignments')
+      if (existingIdx !== -1) {
+        relay[existingIdx] = record
+      } else {
+        relay.push(record)
+      }
+
+      fs.writeFileSync(relayPath, JSON.stringify(relay, null, 2))
+      
+      // Notify client
+      notifyUI('sync:success', 'Simulated Mobile Edit pushed to cloud relay!')
+      notifyUI('sync:updated')
+      return { success: true }
+    }
+
+    if (action === 'grade_conflict') {
+      // Simulate student editing a grade on their phone
+      // Let's find an existing grade in the database to conflict with
+      const existingGrade = db.prepare("SELECT * FROM grades ORDER BY created_at DESC LIMIT 1").get() as any
+      const gradeId = existingGrade ? existingGrade.id : crypto.randomUUID()
+      const courseId = existingGrade ? existingGrade.course_id : 'course-sample'
+      const semester = existingGrade ? existingGrade.semester : 'الفصل الأول 2026'
+
+      // First, modify it locally to cause an unsynced conflict!
+      db.prepare(`
+        UPDATE grades SET grade_value = 85.0, updated_at = ? WHERE id = ?
+      `).run(new Date(Date.now() - 5000).toISOString(), gradeId) // modified locally 5s ago
+
+      // Enqueue the local modification as pending in sync_queue
+      db.prepare(`
+        INSERT INTO sync_queue (id, table_name, record_id, payload, updated_at, device_id, schema_version, status)
+        VALUES (?, 'grades', ?, ?, ?, ?, 1, 'pending')
+      `).run(
+        crypto.randomUUID(),
+        gradeId,
+        JSON.stringify({ id: gradeId, course_id: courseId, semester: semester, grade_value: 85.0, is_deleted: 0, updated_at: new Date(Date.now() - 5000).toISOString() }),
+        new Date(Date.now() - 5000).toISOString(),
+        settings.deviceId
+      )
+
+      // We modify the grade value on the phone (newer timestamp)
+      const payload = {
+        id: gradeId,
+        course_id: courseId,
+        semester: semester,
+        grade_value: 99.5, // High grade from phone!
+        credit_hours: existingGrade ? existingGrade.credit_hours : 3,
+        is_deleted: 0,
+        updated_at: new Date().toISOString()
+      }
+
+      // Encrypt remote phone record
+      const cipher = encryptPayload(payload, settings.encryptionKey)
+      const checksum = crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex')
+
+      const record = {
+        id: gradeId,
+        table_name: 'grades',
+        payload: cipher,
+        updated_at: payload.updated_at,
+        device_id: 'student-phone',
+        schema_version: 1,
+        checksum: checksum
+      }
+
+      const existingIdx = relay.findIndex(r => r.id === record.id && r.table_name === 'grades')
+      if (existingIdx !== -1) {
+        relay[existingIdx] = record
+      } else {
+        relay.push(record)
+      }
+
+      fs.writeFileSync(relayPath, JSON.stringify(relay, null, 2))
+      
+      // Notify client
+      notifyUI('sync:success', 'Simulated Mobile Grade change pushed to cloud relay!')
+      notifyUI('sync:updated')
+      return { success: true }
+    }
+
+    return { error: 'Unknown simulation action' }
+  })
+
+  ipcMain.handle('sync:testConnection', async (_, { url, anonKey }) => {
+    return await testSupabaseConnection(url, anonKey)
   })
 }

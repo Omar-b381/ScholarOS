@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select } from '@/components/ui/select'
 import { Badge } from '@/components/ui/badge'
+import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell } from '@/components/ui/table'
 import {
   Settings as SettingsIcon,
   User,
@@ -18,7 +19,12 @@ import {
   Trash2,
   Moon,
   Sun,
-  Laptop
+  Laptop,
+  Wrench,
+  RefreshCw,
+  History,
+  AlertTriangle,
+  Cloud
 } from 'lucide-react'
 
 export function Settings() {
@@ -69,7 +75,72 @@ export function Settings() {
   const [notif24h, setNotif24h] = React.useState(true)
   const [notif1h, setNotif1h] = React.useState(true)
 
+  // SyncGuard States
+  const [syncSettings, setSyncSettingsState] = React.useState({
+    autoSync: true,
+    paused: false,
+    deviceId: 'desktop-primary',
+    encryptionKey: 'scholar-default-passkey',
+    offlineSimulated: false,
+    lastSyncTimestamp: '1970-01-01T00:00:00.000Z',
+    pendingCount: 0,
+    supabaseUrl: '',
+    supabaseAnonKey: ''
+  })
+  const [syncLogs, setSyncLogs] = React.useState<any[]>([])
+  const [gradeConflicts, setGradeConflicts] = React.useState<any[]>([])
+  const [isSyncing, setIsSyncing] = React.useState(false)
+  const [syncMessage, setSyncMessage] = React.useState<{ type: string; text: string } | null>(null)
+  const [showKey, setShowKey] = React.useState(false)
+  const [showSupaKey, setShowSupaKey] = React.useState(false)
+  const [isTesting, setIsTesting] = React.useState(false)
+  const [testStatus, setTestStatus] = React.useState<{ success: boolean; message: string } | null>(null)
+
+
+  const loadSyncData = React.useCallback(async () => {
+    try {
+      if (window.electronAPI && window.electronAPI.syncGuard) {
+        const status = await window.electronAPI.syncGuard.getStatus()
+        setSyncSettingsState(status)
+        const logs = await window.electronAPI.syncGuard.getLogs()
+        setSyncLogs(logs)
+        const conflicts = await window.electronAPI.syncGuard.getGradeConflicts()
+        setGradeConflicts(conflicts)
+      }
+    } catch (err) {
+      console.error('[SyncGuard UI] Failed to load data:', err)
+    }
+  }, [])
+
   React.useEffect(() => {
+    loadSyncData()
+
+    if (window.electronAPI && window.electronAPI.on) {
+      const unsubUpdated = window.electronAPI.on('sync:updated', () => {
+        loadSyncData()
+        loadAllData() // reload global study data if synced
+      })
+
+      const unsubToast = window.electronAPI.on('sync:toast', (args: any) => {
+        const { type, message } = args
+        setSyncMessage({ type, text: message })
+        loadSyncData()
+        loadAllData()
+        setTimeout(() => {
+          setSyncMessage(null)
+        }, 6000)
+      })
+
+      return () => {
+        if (unsubUpdated) unsubUpdated()
+        if (unsubToast) unsubToast()
+      }
+    }
+    return undefined
+  }, [loadSyncData, loadAllData])
+
+  React.useEffect(() => {
+
     // Fetch version
     window.electronAPI.app.getVersion().then(setAppVersion).catch(console.error)
 
@@ -263,7 +334,76 @@ export function Settings() {
     }
   }
 
+  // SyncGuard Actions
+  const handleSaveSyncSettings = async (e: React.FormEvent) => {
+    e.preventDefault()
+    try {
+      await window.electronAPI.syncGuard.setSettings(syncSettings)
+      alert('تم حفظ إعدادات تزامن SyncGuard بنجاح!')
+      loadSyncData()
+    } catch (err: any) {
+      alert(`فشل حفظ الإعدادات: ${err.message}`)
+    }
+  }
+
+  const handleTestConnection = async () => {
+    if (!syncSettings.supabaseUrl || !syncSettings.supabaseAnonKey) return
+    setIsTesting(true)
+    setTestStatus(null)
+    try {
+      const res = await window.electronAPI.syncGuard.testConnection({
+        url: syncSettings.supabaseUrl,
+        anonKey: syncSettings.supabaseAnonKey
+      })
+      if (res.success) {
+        setTestStatus({ success: true, message: res.error || 'تم الاتصال بالسحابة بنجاح!' })
+      } else {
+        setTestStatus({ success: false, message: res.error || 'فشل الاتصال بـ Supabase.' })
+      }
+    } catch (err: any) {
+      setTestStatus({ success: false, message: err.message || 'فشل الاتصال.' })
+    } finally {
+      setIsTesting(false)
+    }
+  }
+
+
+  const handleManualSync = async () => {
+    setIsSyncing(true)
+    try {
+      const res = await window.electronAPI.syncGuard.triggerSync()
+      if (res.success) {
+        alert(`اكتمل التزامن بنجاح! تم رفع ${res.pushed} وتنزيل ${res.pulled} سجل.`)
+      } else {
+        alert(`فشل التزامن: ${res.error || 'خطأ مجهول'}`)
+      }
+    } catch (err: any) {
+      alert(`حدث خطأ أثناء التزامن: ${err.message}`)
+    } finally {
+      setIsSyncing(false)
+      loadSyncData()
+    }
+  }
+
+  const handleSimulateAction = async (action: string) => {
+    try {
+      const res = await window.electronAPI.syncGuard.simulateAction({ action })
+      if (action === 'toggle_offline') {
+        alert(res.offline ? 'تم تفعيل وضع انقطاع الاتصال الوهمي! ستتراكم التعديلات في قائمة الانتظار.' : 'الجهاز متصل بالشبكة مجدداً! سيتم دفع قائمة الانتظار.');
+      } else if (action === 'mobile_edit') {
+        alert('تمت محاكاة قيام الطالب بتعديل واجب على الهاتف! سيتم سحب التعديل وتطبيقه تلقائياً.');
+      } else if (action === 'grade_conflict') {
+        alert('تمت محاكاة تعديل درجة على الهاتف ودرجة أخرى محلياً! سيحصل تعارض وتتولى حماية الدرجات دمجهما وحفظ كلاهما.');
+      }
+      loadSyncData()
+      loadAllData()
+    } catch (err: any) {
+      alert(`فشل إجراء المحاكاة: ${err.message}`)
+    }
+  }
+
   return (
+
     <div className="p-6 space-y-6 max-w-7xl mx-auto h-full overflow-y-auto scrollbar-thin">
       {/* Header */}
       <div className="border-b pb-4">
@@ -551,8 +691,428 @@ export function Settings() {
         </CardContent>
       </Card>
 
+      {/* SyncGuard Background Sync Dashboard */}
+      <Card className="col-span-1 lg:col-span-2 overflow-hidden border shadow-lg">
+        <CardHeader className="bg-gradient-to-r from-primary/10 via-primary/5 to-transparent py-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-primary/20 text-primary animate-pulse">
+                <SettingsIcon className="h-6 w-6" />
+              </div>
+              <div>
+                <CardTitle className="text-lg font-black text-foreground">تزامن الأجهزة الذكي (SyncGuard)</CardTitle>
+                <CardDescription className="text-xs mt-0.5">مزامنة فورية مشفرة بالكامل لجدول المذاكرة، المهام، والدرجات محلياً وعبر السحاب بين أجهزتك بدقة وأمان.</CardDescription>
+              </div>
+            </div>
+            
+            {/* Status Indicator Badge */}
+            <div className="flex items-center gap-2">
+              {syncSettings.paused ? (
+                <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/20 px-3 py-1 flex items-center gap-1.5 font-bold text-xs">
+                  <div className="h-2 w-2 rounded-full bg-blue-500" />
+                  موقوف مؤقتاً
+                </Badge>
+              ) : syncSettings.offlineSimulated ? (
+                <Badge variant="outline" className="bg-gray-500/10 text-gray-400 border-gray-500/20 px-3 py-1 flex items-center gap-1.5 font-bold text-xs">
+                  <div className="h-2 w-2 rounded-full bg-gray-400 animate-ping" />
+                  وضع الأوفلاين (وهمي)
+                </Badge>
+              ) : (
+                <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 px-3 py-1 flex items-center gap-1.5 font-bold text-xs">
+                  <div className="h-2 w-2 rounded-full bg-emerald-500 animate-ping" />
+                  متصل ومتزامن
+                </Badge>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        
+        <CardContent className="p-6 space-y-6">
+          {/* Silent Toast Alert Banner */}
+          {syncMessage && (
+            <div className={`p-3.5 rounded-lg border text-xs font-semibold animate-in slide-in-from-top duration-300 ${
+              syncMessage.type.includes('offline') ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' :
+              syncMessage.type.includes('error') ? 'bg-destructive/10 text-destructive border-destructive/20' :
+              'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+            }`}>
+              {syncMessage.text}
+            </div>
+          )}
+
+          {/* Sync Header Metadata Glass Container */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-4 rounded-xl border bg-muted/15">
+            <div className="space-y-1">
+              <span className="text-xs font-bold text-muted-foreground">آخر تزامن سحابي ناجح</span>
+              <p className="text-sm font-black text-foreground font-mono">
+                {syncSettings.lastSyncTimestamp && syncSettings.lastSyncTimestamp !== '1970-01-01T00:00:00.000Z'
+                  ? new Date(syncSettings.lastSyncTimestamp).toLocaleString('ar-EG', {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    })
+                  : 'لم يتم التزامن بعد'}
+              </p>
+            </div>
+            <div className="space-y-1 border-r pr-4 border-border/40">
+              <span className="text-xs font-bold text-muted-foreground">تعديلات معلقة في قائمة الانتظار</span>
+              <div className="flex items-center gap-2">
+                <p className="text-lg font-mono font-black text-primary">{syncSettings.pendingCount}</p>
+                {syncSettings.pendingCount > 0 && (
+                  <span className="text-[10px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-2 py-0.5 rounded font-bold">
+                    بانتظار شبكة الاتصال
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="space-y-1 border-r pr-4 border-border/40 flex items-center justify-start md:justify-end gap-2">
+              <Button 
+                onClick={handleManualSync} 
+                disabled={isSyncing || syncSettings.paused}
+                size="sm"
+                className="gap-2 shrink-0 h-9 font-bold text-xs"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+                {isSyncing ? 'جاري التزامن...' : 'مزامنة يدوية الآن'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+            {/* Left Column: Settings Configuration Form */}
+            <form onSubmit={handleSaveSyncSettings} className="space-y-4">
+              <h3 className="text-sm font-black text-primary border-b pb-2 flex items-center gap-1.5">
+                <Database className="h-4.5 w-4.5" />
+                <span>إعدادات الاتصال والتشفير</span>
+              </h3>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex items-center justify-between p-3 border rounded-lg bg-card select-none">
+                  <div className="space-y-0.5">
+                    <label htmlFor="sync_auto" className="text-xs font-bold cursor-pointer text-foreground">تزامن تلقائي خلفي</label>
+                    <p className="text-[10px] text-muted-foreground">دورة كل 5 دقائق</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="sync_auto"
+                    className="rounded border-border cursor-pointer h-4.5 w-4.5 text-primary"
+                    checked={syncSettings.autoSync}
+                    onChange={e => setSyncSettingsState({ ...syncSettings, autoSync: e.target.checked })}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3 border rounded-lg bg-card select-none">
+                  <div className="space-y-0.5">
+                    <label htmlFor="sync_paused" className="text-xs font-bold cursor-pointer text-foreground">إيقاف التزامن مؤقتاً</label>
+                    <p className="text-[10px] text-muted-foreground">تعطيل كافة الدورات</p>
+                  </div>
+                  <input
+                    type="checkbox"
+                    id="sync_paused"
+                    className="rounded border-border cursor-pointer h-4.5 w-4.5 text-primary"
+                    checked={syncSettings.paused}
+                    onChange={e => setSyncSettingsState({ ...syncSettings, paused: e.target.checked })}
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-muted-foreground">مُعرّف هذا الجهاز (Device ID)</label>
+                <Input
+                  required
+                  value={syncSettings.deviceId}
+                  onChange={e => setSyncSettingsState({ ...syncSettings, deviceId: e.target.value })}
+                  placeholder="مثال: main-laptop, mobile-device"
+                />
+              </div>
+
+              <div className="space-y-1 relative">
+                <label className="text-xs font-bold text-muted-foreground">مفتاح التشفير المحلي للأمان AES-256 (Data Cipher Key)</label>
+                <div className="flex gap-2">
+                  <Input
+                    required
+                    type={showKey ? 'text' : 'password'}
+                    value={syncSettings.encryptionKey}
+                    onChange={e => setSyncSettingsState({ ...syncSettings, encryptionKey: e.target.value })}
+                    placeholder="مفتاح سري مشفر للبيانات..."
+                    className="font-mono flex-1"
+                  />
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    onClick={() => setShowKey(!showKey)}
+                    className="px-3 shrink-0 h-10 text-xs font-semibold"
+                  >
+                    {showKey ? 'إخفاء' : 'إظهار'}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground leading-relaxed mt-1">
+                  💡 <strong>أمان تام:</strong> تشفير البيانات يحصل على جهازك قبل إرسالها. يجب تعيين <strong>نفس المفتاح</strong> على جميع أجهزتك (الكمبيوتر والهاتف) لتتمكن من فك تشفير البيانات ومزامنتها بنجاح.
+                </p>
+              </div>
+
+              {/* Supabase Cloud Connection Fields (Optional) */}
+              <div className="border-t pt-4 mt-4 space-y-4">
+                <h4 className="text-xs font-black text-primary flex items-center gap-1.5">
+                  <Cloud className="h-4 w-4" />
+                  <span>الاتصال بسحابة Supabase الحقيقية (اختياري)</span>
+                </h4>
+                <p className="text-[10px] text-muted-foreground leading-relaxed">
+                  إذا كنت ترغب بالانتقال من وضع المحاكاة المحلي إلى التزامن الفعلي المباشر عبر السحاب، قم بإنشاء مشروع في **Supabase** وأدخل بيانات الاتصال هنا. اترك الحقول فارغة للعودة لوضع المحاكاة التلقائي.
+                </p>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-muted-foreground">رابط مشروع Supabase (Supabase Project URL)</label>
+                  <Input
+                    type="text"
+                    value={syncSettings.supabaseUrl || ''}
+                    onChange={e => setSyncSettingsState({ ...syncSettings, supabaseUrl: e.target.value })}
+                    placeholder="https://your-project.supabase.co"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-muted-foreground">المفتاح العام لمشروعك (Supabase Anon Key)</label>
+                  <div className="flex gap-2">
+                    <Input
+                      type={showSupaKey ? 'text' : 'password'}
+                      value={syncSettings.supabaseAnonKey || ''}
+                      onChange={e => setSyncSettingsState({ ...syncSettings, supabaseAnonKey: e.target.value })}
+                      placeholder="eyJhbGciOi..."
+                      className="font-mono flex-1 text-xs"
+                    />
+                    <Button 
+                      type="button" 
+                      variant="outline" 
+                      onClick={() => setShowSupaKey(!showSupaKey)}
+                      className="px-3 shrink-0 h-10 text-xs font-semibold"
+                    >
+                      {showSupaKey ? 'إخفاء' : 'إظهار'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Connectivity test controls */}
+                <div className="flex gap-2 items-center justify-between bg-muted/20 p-2.5 rounded border text-xs">
+                  <span className="font-bold">فحص الاتصال الفوري:</span>
+                  <div className="flex gap-2">
+                    {testStatus && (
+                      <span className={`self-center text-[10px] font-bold px-2 py-0.5 rounded border max-w-[200px] truncate ${
+                        testStatus.success 
+                          ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' 
+                          : 'bg-destructive/10 text-destructive border-destructive/20'
+                      }`} title={testStatus.message}>
+                        {testStatus.message}
+                      </span>
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleTestConnection}
+                      disabled={isTesting || !syncSettings.supabaseUrl || !syncSettings.supabaseAnonKey}
+                      className="h-8 text-[11px] font-bold"
+                    >
+                      {isTesting ? 'جاري الفحص...' : 'تحقق من الاتصال الآن'}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* SQL setup copy-paste snippet */}
+                <div className="space-y-1.5">
+                  <span className="text-[10px] font-bold text-muted-foreground">SQL Setup Snippet:</span>
+                  <div className="p-3 border rounded bg-background/50 text-[10px] font-mono select-all overflow-x-auto leading-relaxed max-h-[140px] text-left scrollbar-thin" dir="ltr">
+                    {`create table sync_records (
+  id text not null,
+  table_name text not null,
+  payload text not null,
+  updated_at timestamp with time zone not null,
+  device_id text not null,
+  schema_version integer default 1,
+  checksum text not null,
+  primary key (id, table_name)
+);
+
+alter table sync_records enable row level security;
+create policy "Allow public access" on sync_records for all using (true) with check (true);`}
+                  </div>
+                  <p className="text-[10px] text-muted-foreground leading-relaxed text-right mt-1">
+                    انسخ الكود أعلاه والزقه في **Supabase SQL Editor** في مشروعك وأنشئ الجدول ليتمكن التطبيق من مزامنة البيانات السحابية الحقيقية بنجاح!
+                  </p>
+                </div>
+              </div>
+
+
+              <div className="flex justify-end pt-2">
+                <Button type="submit" size="sm" className="gap-1.5">
+                  <Save className="h-4 w-4" /> حفظ تكوين التزامن
+                </Button>
+              </div>
+            </form>
+
+            {/* Right Column: Simulation Sandbox */}
+            <div className="space-y-4 p-4 rounded-xl border bg-primary/5">
+              <h3 className="text-sm font-black text-primary border-b pb-2 flex items-center gap-1.5">
+                <Wrench className="h-4.5 w-4.5" />
+                <span>مختبر محاكاة التزامن والتعارض (Simulator Sandbox)</span>
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed">
+                مساحة مخصصة لاختبار سلوك SyncGuard تحت السيناريوهات المختلفة ومراجعة حل التعارضات بشكل مرئي وفوري دون مغادرة التطبيق.
+              </p>
+
+              <div className="flex flex-col gap-3 pt-2">
+                <div className="flex items-center justify-between p-3.5 border rounded-lg bg-card">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-foreground">وضع انقطاع الاتصال (Simulate Offline)</span>
+                    <p className="text-[10px] text-muted-foreground">يقوم بقطع الاتصال الوهمي بالشبكة لاختبار تجميع قائمة الانتظار.</p>
+                  </div>
+                  <Button 
+                    type="button"
+                    variant={syncSettings.offlineSimulated ? 'destructive' : 'outline'}
+                    size="sm"
+                    className="text-xs h-9 font-bold"
+                    onClick={() => handleSimulateAction('toggle_offline')}
+                  >
+                    {syncSettings.offlineSimulated ? 'إلغاء قطع الاتصال' : 'قطع الاتصال بالشبكة'}
+                  </Button>
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 border rounded-lg bg-card">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-foreground">محاكاة تعديل هاتف الطالب (Mobile Edit)</span>
+                    <p className="text-[10px] text-muted-foreground">يقوم بكتابة واجب دراسي جديد من هاتف الطالب إلى الخادم السحابي.</p>
+                  </div>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm"
+                    className="text-xs h-9 font-bold"
+                    onClick={() => handleSimulateAction('mobile_edit')}
+                  >
+                    محاكاة تعديل الهاتف
+                  </Button>
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 border rounded-lg bg-card">
+                  <div className="space-y-1">
+                    <span className="text-xs font-bold text-foreground">توليد تعارض في الدرجات (Grade Conflict)</span>
+                    <p className="text-[10px] text-muted-foreground">يولد تعارضاً في رصد الدرجات بين الهاتف والكمبيوتر لتفعيل حماية الدرجات.</p>
+                  </div>
+                  <Button 
+                    type="button" 
+                    variant="outline" 
+                    size="sm"
+                    className="text-xs h-9 font-bold text-destructive hover:bg-destructive/5 border-destructive/20 text-destructive"
+                    onClick={() => handleSimulateAction('grade_conflict')}
+                  >
+                    توليد تعارض درجات
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Grade Conflict Log Review Table */}
+          {gradeConflicts.length > 0 && (
+            <div className="border rounded-xl p-4 space-y-3 bg-destructive/5 border-destructive/20 mt-4">
+              <h4 className="text-xs font-black text-destructive flex items-center gap-1.5">
+                <AlertTriangle className="h-4.5 w-4.5" />
+                <span>سجل تعارضات الدرجات الأكاديمية ورصدها (قانون حماية الدرجات)</span>
+              </h4>
+              <p className="text-[10px] text-muted-foreground leading-relaxed">
+                تم رصد تعديل مختلف للدرجة نفسها من جهازين في نفس الوقت. تم الاحتفاظ بالدرجة ذات التحديث الأحدث تلقائياً ورصدها بالأسفل للشفافية الأكاديمية التامة.
+              </p>
+              <div className="overflow-x-auto">
+                <Table className="text-xs">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>معرّف السجل</TableHead>
+                      <TableHead>المقرر /Semester</TableHead>
+                      <TableHead>الدرجة المحلية (الكمبيوتر)</TableHead>
+                      <TableHead>الدرجة البعيدة (الهاتف)</TableHead>
+                      <TableHead>تاريخ الرصد</TableHead>
+                      <TableHead>الحالة الأوتوماتيكية</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {gradeConflicts.map((c, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-mono text-[10px]">{c.record_id.slice(0, 8)}...</TableCell>
+                        <TableCell className="font-bold">{c.semester}</TableCell>
+                        <TableCell className="font-mono text-destructive">{c.local_grade || 0}</TableCell>
+                        <TableCell className="font-mono text-emerald-600 font-bold">{c.remote_grade || 0}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{new Date(c.resolved_at).toLocaleString('ar-EG')}</TableCell>
+                        <TableCell>
+                          <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 px-2 py-0.5 rounded">
+                            تم الحفظ والدمج التلقائي
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {/* Sync History Logs Table */}
+          <div className="border rounded-xl p-4 space-y-3">
+            <h4 className="text-xs font-black text-foreground flex items-center gap-1.5">
+              <History className="h-4.5 w-4.5 text-primary" />
+              <span>سجل عمليات المزامنة والتفاصيل (Sync History Logs)</span>
+            </h4>
+            
+            {syncLogs.length === 0 ? (
+              <div className="py-6 text-center text-xs text-muted-foreground">لا توجد سجلات مزامنة مسجلة بعد.</div>
+            ) : (
+              <div className="overflow-x-auto max-h-[220px] overflow-y-auto pr-1 scrollbar-thin">
+                <Table className="text-xs">
+                  <TableHeader className="sticky top-0 bg-card z-15">
+                    <TableRow>
+                      <TableHead>تاريخ العملية</TableHead>
+                      <TableHead>الحالة</TableHead>
+                      <TableHead>المرفوعة</TableHead>
+                      <TableHead>المنزلة</TableHead>
+                      <TableHead>التعارضات</TableHead>
+                      <TableHead>الزمن (ملي ثانية)</TableHead>
+                      <TableHead>تفاصيل الخطأ</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {syncLogs.slice(0, 6).map((log, idx) => (
+                      <TableRow key={idx}>
+                        <TableCell className="font-mono text-[10px]">
+                          {new Date(log.timestamp).toLocaleString('ar-EG', {
+                            hour: 'numeric',
+                            minute: '2-digit',
+                            second: '2-digit'
+                          })}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant={log.status === 'success' ? 'success' : 'destructive'} className="text-[9px] font-bold py-0">
+                            {log.status === 'success' ? 'نجاح' : 'خطأ'}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="font-mono text-[10px]">{log.records_pushed}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{log.records_pulled}</TableCell>
+                        <TableCell className="font-mono text-[10px] font-bold text-amber-500">{log.conflicts_resolved}</TableCell>
+                        <TableCell className="font-mono text-[10px]">{log.duration_ms}ms</TableCell>
+                        <TableCell className="text-[10px] text-destructive font-mono truncate max-w-[200px]">{log.error || '-'}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Notifications Preference and Theme controls */}
+
         <Card className="flex flex-col justify-between">
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">

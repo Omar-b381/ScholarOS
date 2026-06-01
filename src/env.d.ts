@@ -167,5 +167,16 @@ interface Window {
     schedule_generate: (payload: any) => Promise<{ schedule: any; error: string | null }>;
     schedule_getAll: () => Promise<any[]>;
     schedule_delete: (id: string) => Promise<{ ok: boolean }>;
+
+    // SyncGuard Background Sync Service
+    syncGuard: {
+      getStatus: () => Promise<any>;
+      getLogs: () => Promise<any[]>;
+      getGradeConflicts: () => Promise<any[]>;
+      triggerSync: () => Promise<any>;
+      setSettings: (settings: any) => Promise<any>;
+      simulateAction: (args: { action: string; data?: any }) => Promise<any>;
+      testConnection: (args: { url: string; anonKey: string }) => Promise<{ success: boolean; error?: string }>;
+    };
   };
 }

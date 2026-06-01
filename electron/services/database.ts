@@ -242,21 +242,186 @@ export function initDatabase() {
     }
   }
 
+  // --- SyncGuard Database Initialization ---
+  try {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schedule_slots (
+        id TEXT PRIMARY KEY,
+        course_id TEXT NOT NULL,
+        day_of_week TEXT NOT NULL,
+        start_time TEXT NOT NULL,
+        room TEXT,
+        instructor TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        checksum TEXT,
+        is_deleted INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        course_id TEXT,
+        due_date TEXT,
+        status TEXT DEFAULT 'pending',
+        notes TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        checksum TEXT,
+        is_deleted INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS kanban_tasks (
+        id TEXT PRIMARY KEY,
+        task_id TEXT NOT NULL,
+        kanban_column TEXT NOT NULL,
+        kanban_order INTEGER NOT NULL,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        checksum TEXT,
+        is_deleted INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS gpa_history (
+        id TEXT PRIMARY KEY,
+        semester TEXT NOT NULL,
+        gpa REAL NOT NULL,
+        recorded_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        checksum TEXT,
+        is_deleted INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS sync_queue (
+        id TEXT PRIMARY KEY,
+        table_name TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        device_id TEXT NOT NULL,
+        schema_version INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'pending'
+      );
+
+      CREATE TABLE IF NOT EXISTS grade_conflict_log (
+        id TEXT PRIMARY KEY,
+        record_id TEXT NOT NULL,
+        course_id TEXT,
+        semester TEXT,
+        local_grade REAL,
+        remote_grade REAL,
+        local_updated_at TEXT,
+        remote_updated_at TEXT,
+        resolved_at TEXT DEFAULT CURRENT_TIMESTAMP
+      );
+
+      CREATE TABLE IF NOT EXISTS sync_logs (
+        id TEXT PRIMARY KEY,
+        timestamp TEXT DEFAULT CURRENT_TIMESTAMP,
+        device_id TEXT,
+        status TEXT,
+        records_pushed INTEGER DEFAULT 0,
+        records_pulled INTEGER DEFAULT 0,
+        conflicts_resolved INTEGER DEFAULT 0,
+        duration_ms INTEGER DEFAULT 0,
+        error TEXT
+      );
+    `);
+
+    // Dynamically add sync columns to existing tables
+    const syncTables = ['courses', 'grades', 'attendance', 'assignments']
+    for (const tableName of syncTables) {
+      const cols = db.prepare(`PRAGMA table_info(${tableName})`).all() as any[]
+      
+      if (!cols.some(c => c.name === 'updated_at')) {
+        try { db.exec(`ALTER TABLE ${tableName} ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP`) } catch (e) {}
+      }
+      if (!cols.some(c => c.name === 'device_id')) {
+        try { db.exec(`ALTER TABLE ${tableName} ADD COLUMN device_id TEXT`) } catch (e) {}
+      }
+      if (!cols.some(c => c.name === 'checksum')) {
+        try { db.exec(`ALTER TABLE ${tableName} ADD COLUMN checksum TEXT`) } catch (e) {}
+      }
+      if (!cols.some(c => c.name === 'is_deleted')) {
+        try { db.exec(`ALTER TABLE ${tableName} ADD COLUMN is_deleted INTEGER DEFAULT 0`) } catch (e) {}
+      }
+    }
+  } catch (err) {
+    console.error('Failed to run SyncGuard table initializations', err)
+  }
+
   // Automatic seeding is disabled to allow empty fresh startup
 }
+
+// --- SyncGuard Enqueuer Helper ---
+let localChangeCallback: (() => void) | null = null
+
+export function registerLocalChangeCallback(callback: () => void) {
+  localChangeCallback = callback
+}
+
+export function enqueueChange(tableName: string, recordId: string, payload: any, isDeleted: number = 0) {
+  try {
+    const Store = require('electron-store')
+    const store = new Store()
+    const deviceId = store.get('settings.sync.deviceId', 'desktop-primary')
+    const updatedAt = new Date().toISOString()
+
+    const recordPayload = {
+      ...payload,
+      id: recordId,
+      updated_at: updatedAt,
+      device_id: deviceId,
+      is_deleted: isDeleted
+    }
+
+    const crypto = require('crypto')
+    const checksum = crypto.createHash('sha256').update(JSON.stringify(recordPayload)).digest('hex')
+    recordPayload.checksum = checksum
+
+    // 1. Update the local SQLite record itself with the sync metadata
+    try {
+      db.prepare(`
+        UPDATE ${tableName} 
+        SET updated_at = ?, device_id = ?, checksum = ?, is_deleted = ?
+        WHERE id = ?
+      `).run(updatedAt, deviceId, checksum, isDeleted, recordId)
+    } catch (e) {
+      // It's normal to catch here if it's not a pre-existing record or it was deleted
+    }
+
+    // 2. Enqueue the change in sync_queue
+    const id = crypto.randomUUID()
+    db.prepare(`
+      INSERT INTO sync_queue (id, table_name, record_id, payload, updated_at, device_id, schema_version, status)
+      VALUES (?, ?, ?, ?, ?, ?, 1, 'pending')
+    `).run(id, tableName, recordId, JSON.stringify(recordPayload), updatedAt, deviceId)
+
+    // Trigger sync run after a tiny delay if we are online and not paused
+    if (localChangeCallback) {
+      try {
+        localChangeCallback()
+      } catch (e) {}
+    }
+  } catch (err) {
+    console.error('[SyncGuard] Error enqueuing local database change:', err)
+  }
+}
+
 
 // DB Helpers
 
 // Courses
 export function getAllCourses() {
-  return db.prepare('SELECT * FROM courses ORDER BY name ASC').all()
+  return db.prepare('SELECT * FROM courses WHERE is_deleted = 0 ORDER BY name ASC').all()
 }
 
 export function saveCourse(course: any) {
   const { id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes } = course
   const stmt = db.prepare(`
-    INSERT INTO courses (id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO courses (id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       code = excluded.code,
@@ -265,14 +430,18 @@ export function saveCourse(course: any) {
       color = excluded.color,
       schedule = excluded.schedule,
       syllabus = excluded.syllabus,
-      notes = excluded.notes
+      notes = excluded.notes,
+      is_deleted = 0
   `)
   stmt.run(id, name, code, teacher_name, teacher_email, color, schedule, syllabus, notes)
+  enqueueChange('courses', id, course)
 }
 
 export function deleteCourse(id: string) {
-  db.prepare('DELETE FROM courses WHERE id = ?').run(id)
+  db.prepare('UPDATE courses SET is_deleted = 1 WHERE id = ?').run(id)
+  enqueueChange('courses', id, { id }, 1)
 }
+
 
 // Events
 export function getEventsRange(start: string, end: string) {
@@ -303,14 +472,14 @@ export function deleteEvent(id: string) {
 
 // Assignments
 export function getAllAssignments() {
-  return db.prepare('SELECT * FROM assignments ORDER BY due_date ASC').all()
+  return db.prepare('SELECT * FROM assignments WHERE is_deleted = 0 ORDER BY due_date ASC').all()
 }
 
 export function saveAssignment(assignment: any) {
   const { id, title, course_id, due_date, status, grade, notes, pdf_path } = assignment
   const stmt = db.prepare(`
-    INSERT INTO assignments (id, title, course_id, due_date, status, grade, notes, pdf_path)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO assignments (id, title, course_id, due_date, status, grade, notes, pdf_path, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       title = excluded.title,
       course_id = excluded.course_id,
@@ -318,14 +487,18 @@ export function saveAssignment(assignment: any) {
       status = excluded.status,
       grade = excluded.grade,
       notes = excluded.notes,
-      pdf_path = excluded.pdf_path
+      pdf_path = excluded.pdf_path,
+      is_deleted = 0
   `)
   stmt.run(id, title, course_id, due_date, status, grade, notes, pdf_path)
+  enqueueChange('assignments', id, assignment)
 }
 
 export function deleteAssignment(id: string) {
-  db.prepare('DELETE FROM assignments WHERE id = ?').run(id)
+  db.prepare('UPDATE assignments SET is_deleted = 1 WHERE id = ?').run(id)
+  enqueueChange('assignments', id, { id }, 1)
 }
+
 
 // Goals
 export function getAllGoals() {
@@ -355,27 +528,31 @@ export function deleteGoal(id: string) {
 
 // Grades
 export function getAllGrades() {
-  return db.prepare('SELECT * FROM grades ORDER BY semester ASC').all()
+  return db.prepare('SELECT * FROM grades WHERE is_deleted = 0 ORDER BY semester ASC').all()
 }
 
 export function saveGrade(grade: any) {
   const { id, course_id, semester, grade_value, credit_hours, created_at } = grade
   const created = created_at || new Date().toISOString()
   const stmt = db.prepare(`
-    INSERT INTO grades (id, course_id, semester, grade_value, credit_hours, created_at)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO grades (id, course_id, semester, grade_value, credit_hours, created_at, is_deleted)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
     ON CONFLICT(id) DO UPDATE SET
       course_id = excluded.course_id,
       semester = excluded.semester,
       grade_value = excluded.grade_value,
-      credit_hours = excluded.credit_hours
+      credit_hours = excluded.credit_hours,
+      is_deleted = 0
   `)
   stmt.run(id, course_id, semester, grade_value, credit_hours, created)
+  enqueueChange('grades', id, grade)
 }
 
 export function deleteGrade(id: string) {
-  db.prepare('DELETE FROM grades WHERE id = ?').run(id)
+  db.prepare('UPDATE grades SET is_deleted = 1 WHERE id = ?').run(id)
+  enqueueChange('grades', id, { id }, 1)
 }
+
 
 // Wiki Pages
 export function getAllWikiPages() {
