@@ -608,7 +608,7 @@ function registerIpcHandlers() {
     ).get(cacheKey) as any
     if (cached) {
       const age = Date.now() - new Date(cached.fetched_at).getTime()
-      if (age < 3600000) return JSON.parse(cached.results) // return if < 1hr old
+      if (age < 3600000) return { papers: JSON.parse(cached.results), error: null } // return wrapped if < 1hr old
     }
 
     try {
@@ -682,7 +682,7 @@ function registerIpcHandlers() {
     ).get(cacheKey) as any
     if (cached) {
       const age = Date.now() - new Date(cached.fetched_at).getTime()
-      if (age < 86400000) return JSON.parse(cached.results) // 24hr cache for books
+      if (age < 86400000) return { books: JSON.parse(cached.results), error: null } // 24hr cache for books
     }
 
     try {

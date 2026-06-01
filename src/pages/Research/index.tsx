@@ -22,7 +22,7 @@ export function ResearchPage() {
   async function loadSavedBooks() {
     try {
       const list = await window.electronAPI.research_getSavedBooks()
-      setSavedBooks(list)
+      setSavedBooks(list || [])
     } catch (err) {
       console.error(err)
     }
@@ -35,10 +35,10 @@ export function ResearchPage() {
     setSuccess('')
     try {
       const res = await window.electronAPI.research_searchPapers(query)
-      if (res.error) {
+      if (res && res.error) {
         setError(res.error)
       } else {
-        setPapers(res.papers)
+        setPapers((res && res.papers) || [])
       }
     } catch (err) {
       console.error(err)
@@ -54,10 +54,10 @@ export function ResearchPage() {
     setSuccess('')
     try {
       const res = await window.electronAPI.research_searchBooks(query)
-      if (res.error) {
+      if (res && res.error) {
         setError(res.error)
       } else {
-        setBooks(res.books)
+        setBooks((res && res.books) || [])
       }
     } catch (err) {
       console.error(err)
