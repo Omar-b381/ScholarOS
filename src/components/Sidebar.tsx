@@ -24,7 +24,8 @@ import {
   Flame,
   Search,
   Sigma,
-  Sparkles
+  Sparkles,
+  BookMarked
 } from 'lucide-react'
 
 export function Sidebar() {
@@ -73,7 +74,8 @@ export function Sidebar() {
     { id: 'focus', label: 'جلسة التركيز والـ XP', icon: Timer },
     { id: 'attendance', label: 'تتبع الحضور والغياب', icon: ClipboardCheck },
     { id: 'habits', label: 'متتبع العادات اليومية', icon: Flame },
-    { id: 'schedule', label: 'جدول المذاكرة الذكي', icon: Sparkles }
+    { id: 'schedule', label: 'جدول المذاكرة الذكي', icon: Sparkles },
+    { id: 'selfstudy', label: 'مسارات التعلم الحر', icon: BookMarked }
   ]
 
   const toolItems = [

@@ -23,6 +23,7 @@ import { HabitsPage } from '@/pages/Habits'
 import { ResearchPage } from '@/pages/Research'
 import { FormulaSheetPage } from '@/pages/FormulaSheet'
 import { StudySchedulePage } from '@/pages/StudySchedule'
+import { SelfStudyPage } from '@/pages/SelfStudy'
 
 export default function App() {
   const { activePage, loadAllData, isLoading } = useAppStore()
@@ -112,6 +113,8 @@ export default function App() {
         return <FormulaSheetPage />
       case 'schedule':
         return <StudySchedulePage />
+      case 'selfstudy':
+        return <SelfStudyPage />
       default:
         return <Dashboard />
     }
