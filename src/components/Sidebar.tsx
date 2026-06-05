@@ -68,14 +68,14 @@ export function Sidebar() {
   const menuItems = [
     { id: 'dashboard', label: 'لوحة التحكم', icon: LayoutDashboard },
     { id: 'courses', label: 'المواد الدراسية', icon: BookOpen },
+    { id: 'selfstudy', label: 'مسارات التعلم الحر', icon: BookMarked },
     { id: 'calendar', label: 'التقويم الجامعي', icon: Calendar },
     { id: 'assignments', label: 'الواجبات والخزنة', icon: FileSpreadsheet },
     { id: 'goals', label: 'الأهداف والمعدل', icon: Target },
     { id: 'focus', label: 'جلسة التركيز والـ XP', icon: Timer },
     { id: 'attendance', label: 'تتبع الحضور والغياب', icon: ClipboardCheck },
     { id: 'habits', label: 'متتبع العادات اليومية', icon: Flame },
-    { id: 'schedule', label: 'جدول المذاكرة الذكي', icon: Sparkles },
-    { id: 'selfstudy', label: 'مسارات التعلم الحر', icon: BookMarked }
+    { id: 'schedule', label: 'جدول المذاكرة الذكي', icon: Sparkles }
   ]
 
   const toolItems = [

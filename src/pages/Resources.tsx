@@ -274,7 +274,12 @@ export function Resources() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {filteredResources.map((res) => {
                 const course = courses.find(c => c.id === res.course_id)
-                const tagsList = JSON.parse(res.tags || '[]')
+                let tagsList: string[] = []
+                try {
+                  tagsList = JSON.parse(res.tags || '[]')
+                } catch (e) {
+                  tagsList = (res.tags || '').split(',').map((t: string) => t.trim()).filter(Boolean)
+                }
                 
                 return (
                   <Card key={res.id} className="flex flex-col justify-between hover:shadow-lg transition-shadow duration-200">
